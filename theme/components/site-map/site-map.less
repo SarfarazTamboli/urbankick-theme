@@ -1,0 +1,124 @@
+@import "../../styles/main.less";
+
+.sitemapWrapper {
+  width: 100%;
+  padding:0px 80px;
+}
+
+.sitemapContainer {
+  max-width: 1300px;
+  margin: 0 auto;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+
+  .sitemapTitle {
+    color: @TextBody;
+    font-weight: 600;
+    font-size: 32px;
+    line-height: 1.1;
+    text-align: center;
+  }
+
+  .sitemapSections {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+    height: auto;
+  }
+
+  .sitemapSection {
+    width: 100%;
+    background: @PageBackground;
+    padding: 16px;
+
+    break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+    page-break-inside: avoid;
+
+    .sectionTitle {
+      color: @ButtonPrimary;
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      transition: color 0.2s ease;
+      border-left: 4px solid @ButtonPrimary;
+      border-radius: 2px;
+      padding-left: 8px;
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+    }
+
+    /* Apply hover effect only if .hoverStyles class is present */
+    .hoverStyles:hover {
+      color: @ButtonLink;
+      cursor: pointer;
+
+      a {
+        color: @ButtonLink;
+        text-decoration: underline;
+      }
+    }
+
+    .sitemapItems {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 12px;
+
+      @media @tablet {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      @media @mobile {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .sitemapItem {
+      position: relative;
+      margin: 6px 0;
+      padding-left: 12px;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      /* chevron bullet  here */
+      &::before {
+        content: "›";
+        position: absolute;
+        left: 8px;
+        top: 8px;
+        line-height: 1.2;
+        font-weight: 700;
+        color: #a3a3a3;
+      }
+
+      a {
+        display: block;
+        color: @ButtonLink;
+        text-decoration: none;
+        padding: 8px 12px;
+        border-radius: 10px;
+        transition:
+          background 0.2s,
+          color 0.2s,
+          opacity 0.2s;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+        word-break: break-word;
+        white-space: normal;
+
+        &:hover {
+          opacity: 0.8;
+          text-decoration: underline;
+          background: #f9fafb;
+        }
+      }
+    }
+  }
+}

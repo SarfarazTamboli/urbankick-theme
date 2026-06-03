@@ -1,0 +1,1561 @@
+import Pixelbin, { transformations } from "@pixelbin/core";
+import {
+  DEFAULT_CURRENCY_LOCALE,
+  DEFAULT_UTC_LOCALE,
+  DIRECTION_ADAPTIVE_CSS_PROPERTIES,
+  FLOAT_MAP,
+  TEXT_ALIGNMENT_MAP,
+  IMAGE_OPTIMIZATION_CONFIG,
+} from "./constant";
+import { useEffect, useState } from "react";
+
+export const debounce = (func, wait) => {
+  let timeout;
+  const debouncedFunction = (...args) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(function applyFunc() {
+      func.apply(this, args);
+    }, wait);
+  };
+  return debouncedFunction;
+};
+
+export const getGlobalConfigValue = (globalConfig, id) =>
+  globalConfig?.props?.[id] ?? "";
+
+/**
+ * Returns effective carousel control visibility based on viewport and config.
+ * Mobile/Tablet: arrows visible when selected AND content overflows; dots visible when selected.
+ * Desktop: arrows visible when selected AND content overflows; dots visible when selected.
+ * @param {Object} globalConfig - Theme global config
+ * @param {boolean} isDesktop - True when viewport is desktop (>= 769px)
+ * @param {number} itemLength - Total number of carousel items
+ * @param {number} itemsPerViewport - Items visible in viewport at once
+ * @returns {{ showArrows: boolean, showDots: boolean }}
+ */
+const getConfigValue = (val) =>
+  val != null && typeof val === "object" && "value" in val ? val.value : val;
+
+export const getEffectiveCarouselControls = (
+  globalConfig,
+  isDesktop,
+  itemLength,
+  itemsPerViewport
+) => {
+  const mobileRaw =
+    globalConfig?.carousel_controls_mobile ??
+    globalConfig?.props?.carousel_controls_mobile ??
+    "none";
+  const desktopRaw =
+    globalConfig?.carousel_controls_desktop ??
+    globalConfig?.props?.carousel_controls_desktop ??
+    "none";
+  const mobileConfig = getConfigValue(mobileRaw) ?? "none";
+  const desktopConfig = getConfigValue(desktopRaw) ?? "none";
+
+  if (isDesktop) {
+    const contentOverflows = itemLength > itemsPerViewport;
+    return {
+      showArrows:
+        desktopConfig === "show_arrow" && contentOverflows,
+      showDots: desktopConfig === "show_dots",
+    };
+  }
+
+  // Mobile & Tablet: arrows visible when selected AND content overflows
+  const contentOverflows = itemLength > itemsPerViewport;
+  return {
+    showArrows: mobileConfig === "show_arrow" && contentOverflows,
+    showDots: mobileConfig === "show_dots",
+  };
+};
+
+export const getSocialIcon = (title) =>
+  title && typeof title === "string" ? `footer-${title.toLowerCase()}` : "";
+
+export function replaceQueryPlaceholders(queryFormat, value1, value2) {
+  return queryFormat.replace("{}", value1).replace("{}", value2);
+}
+
+export const singleValuesFilters = {
+  sortOn: true,
+};
+
+export function capitalize(str) {
+  if (!str) return str; // Return the string as-is if it's empty or undefined
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+/**
+ * Validates custom badge (teaser_tag) for display.
+ * Returns false if badge is empty, whitespace-only, single character, or "."
+ * @param {string|null|undefined} teaserTag - The custom badge text
+ * @returns {boolean} - True if badge should be rendered
+ */
+export const isValidCustomBadge = (teaserTag) => {
+  if (teaserTag == null || typeof teaserTag !== "string") return false;
+  const trimmed = teaserTag.trim();
+  return trimmed.length > 1 && trimmed !== ".";
+};
+
+/**
+ * Format number with locale-aware comma separation
+ * Uses native Intl.NumberFormat for optimal performance
+ * @param {number|string} number - The number to format
+ * @param {string} locale - Locale string (e.g., 'en-IN' for India, 'en-AE' for UAE)
+ * @returns {string} Formatted number string
+ */
+export const numberWithCommas = (number = 0, locale = "en-IN") => {
+  if (number == null || number === "") return "0";
+
+  // Convert to number if it's a string
+  const num = typeof number === "string" ? parseFloat(number) : number;
+
+  if (Number.isNaN(num)) return "0";
+
+  // Determine if we should use Indian numbering system
+  // Indian numbering: 1,25,000 (grouping: 3,2,2...)
+  // International numbering: 125,000 (grouping: 3,3,3...)
+  const isIndianLocale = locale === "en-IN" || locale?.startsWith("en-IN");
+
+  try {
+    // Use Intl.NumberFormat for locale-aware formatting
+    // For Indian locale, use 'latn' numbering system to get Indian-style grouping
+    // For other locales, use default numbering system
+    const numberingSystem = isIndianLocale ? "latn" : undefined;
+    const localeString = numberingSystem
+      ? `${locale}-u-nu-${numberingSystem}`
+      : locale;
+
+    const formatter = new Intl.NumberFormat(localeString, {
+      maximumFractionDigits: 20, // Preserve decimal places
+      useGrouping: true,
+    });
+
+    return formatter.format(num);
+  } catch (error) {
+    // Fallback to basic formatting if locale is invalid
+    // eslint-disable-next-line no-console
+    console.warn(
+      `Invalid locale "${locale}", falling back to default formatting`
+    );
+    return num.toLocaleString("en-US");
+  }
+};
+export function isRunningOnClient() {
+  if (typeof window !== "undefined") {
+    return globalThis === window;
+  }
+
+  return false;
+}
+
+export const useMobile = (breakpoint = 768) => {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    if (!isRunningOnClient()) return;
+    const handleResize = () => {
+      if (typeof window !== "undefined") {
+        setIsMobile(window?.innerWidth <= breakpoint);
+      }
+    };
+
+    handleResize();
+
+    window?.addEventListener("resize", handleResize);
+    return () => {
+      window?.removeEventListener("resize", handleResize);
+    };
+  }, [breakpoint]);
+
+  return isMobile;
+};
+
+/**
+ * Returns current breakpoint: "desktop" (>=780px), "tablet" (480-779px), or "mobile" (<480px)
+ */
+export const useBreakpoint = () => {
+  const [breakpoint, setBreakpoint] = useState("desktop");
+
+  useEffect(() => {
+    if (!isRunningOnClient()) return;
+    const handleResize = () => {
+      if (typeof window !== "undefined") {
+        const width = window?.innerWidth;
+        if (width >= 780) setBreakpoint("desktop");
+        else if (width >= 480) setBreakpoint("tablet");
+        else setBreakpoint("mobile");
+      }
+    };
+
+    handleResize();
+    window?.addEventListener("resize", handleResize);
+    return () => window?.removeEventListener("resize", handleResize);
+  }, []);
+
+  return breakpoint;
+};
+
+export const copyToClipboard = (str) => {
+  const el = document.createElement("textarea");
+  el.value = str;
+  el.setAttribute("readonly", "");
+  el.style.position = "absolute";
+  el.style.left = "-9999px";
+  document.body.appendChild(el);
+  const selected =
+    document.getSelection().rangeCount > 0
+      ? document.getSelection().getRangeAt(0)
+      : false;
+  el.select();
+  document.execCommand("copy");
+  document.body.removeChild(el);
+  if (selected) {
+    document.getSelection().removeAllRanges();
+    document.getSelection().addRange(selected);
+  }
+};
+
+export function convertDate(dateString, locale = "en-US") {
+  const date = new Date(dateString);
+
+  const options = {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    hour12: true,
+    timeZone: "UTC",
+  };
+
+  const formatter = new Intl.DateTimeFormat(locale, options);
+  const formattedDate = formatter.format(date);
+
+  return formattedDate;
+}
+
+// Convert ISO date string to DD-MM-YYYY format
+export function convertISOToDDMMYYYY(isoString) {
+  if (!isoString) return "";
+
+  // Extract date part from ISO string (YYYY-MM-DD) to avoid timezone issues
+  // For DOB, we only care about the date, not the time
+  const datePart = isoString.split("T")[0];
+  if (!datePart) return "";
+
+  const parts = datePart.split("-");
+  if (parts.length !== 3) {
+    // Fallback to Date object parsing if format is unexpected
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return "";
+    const day = String(date.getDate()).padStart(2, "0");
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const year = date.getFullYear();
+    return `${day}-${month}-${year}`;
+  }
+
+  // Convert from YYYY-MM-DD to DD-MM-YYYY
+  const [year, month, day] = parts;
+  return `${day}-${month}-${year}`;
+}
+
+// Convert DD-MM-YYYY format to ISO string
+export function convertDDMMYYYYToISO(dateString) {
+  if (!dateString) return "";
+  const parts = dateString.split("-").map(Number);
+  if (parts.length !== 3) return "";
+  // Assuming DD-MM-YYYY format
+  // Use Date.UTC to create date in UTC timezone to avoid timezone shift issues
+  const dateObj = new Date(Date.UTC(parts[2], parts[1] - 1, parts[0]));
+  if (isNaN(dateObj.getTime())) return "";
+  return dateObj.toISOString();
+}
+
+export const convertUTCDateToLocalDate = (date, format, locale = "en-US") => {
+  if (!date) {
+    return "Invalid date";
+  }
+
+  let frm = format;
+  if (!frm) {
+    frm = {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      hour12: true,
+    };
+  }
+
+  try {
+    const utcDate = new Date(date);
+
+    if (Number.isNaN(utcDate.getTime())) {
+      return "Invalid date";
+    }
+
+    // Convert the UTC date to the local date using toLocaleString() with specific time zone
+    const browserTimezone =
+      Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const options = {
+      ...frm,
+      timeZone: browserTimezone,
+    };
+    // Convert the UTC date and time to the desired format
+    const formattedDate = utcDate
+      .toLocaleString(locale, options)
+      .replace(" at ", ", ");
+    return formattedDate;
+  } catch (error) {
+    return "Invalid date";
+  }
+};
+
+export function validateName(name) {
+  const regexp = /^\p{L}+(?:[' -]\p{L}+)*$/u;
+  return regexp.test(String(name).toLowerCase().trim());
+}
+
+export function validateEmailField(value) {
+  const emailPattern =
+    /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+  return emailPattern.test(value);
+}
+
+export function validatePhone(phoneNo) {
+  const re = /^[0-9]{10}$/;
+  return phoneNo && phoneNo.length && re.test(phoneNo.trim());
+}
+
+export function validatePasswordField(value) {
+  const passwordPattern =
+    /^(?=.*[A-Za-z])(?=.*\d)(?=.*[`~\!@#\$%\^\&\*\(\)\-_\=\+\[\{\}\]\\|;:\'",<.>\/\?€£¥₹§±])[A-Za-z\d`~\!@#\$%\^\&\*\(\)\-_\=\+\[\{\}\]\\|;:\'",<.>\/\?€£¥₹§±]{8,}$/;
+  return passwordPattern.test(value);
+}
+
+export function checkIfNumber(value) {
+  const numberPattern = /^[0-9]+$/;
+  return numberPattern.test(value);
+}
+
+export function isEmptyOrNull(obj) {
+  return (
+    obj === null ||
+    obj === undefined ||
+    (typeof obj === "object" && Object.keys(obj).length === 0)
+  );
+}
+
+/**
+ * Transform image URL with Pixelbin optimizations for better quality and performance
+ * @param {string} url - Original image URL
+ * @param {number} width - Target width in pixels
+ * @param {Object} options - Additional transformation options
+ * @param {number} options.quality - Image quality (1-100, default: from IMAGE_OPTIMIZATION_CONFIG)
+ * @param {number} options.dpr - Device pixel ratio (default: auto-detect, max from config)
+ * @param {string} options.format - Output format ('auto', 'webp', 'jpeg', 'png', default: 'auto')
+ * @param {boolean} options.sharpen - Apply sharpening to prevent blur (default: from config)
+ * @param {number} options.sharpness - Sharpening intensity (0-10, default: from config)
+ * @returns {string} Transformed image URL
+ */
+export const transformImage = (url, width, options = {}) => {
+  let updatedUrl = url;
+  try {
+    const obj = Pixelbin.utils.urlToObj(url);
+    if (
+      width ||
+      options.quality ||
+      options.format ||
+      options.sharpen !== false
+    ) {
+      const pixelbin = new Pixelbin({
+        cloudName: obj.cloudName,
+        zone: obj.zone || "default",
+      });
+
+      // DPR is intentionally fixed at 1 here — RESPONSIVE_IMAGE_BREAKPOINTS already
+      // bakes DPR into the width values (e.g. 1440px viewport → 1920px image).
+      // Auto-detecting window.devicePixelRatio caused SSR/client URL mismatch
+      // (dpr=1 on server, dpr=2 on client), which re-fetched every image on hydration.
+      const dpr = options.dpr !== undefined ? options.dpr : 1;
+
+      const transformationArray = [];
+
+      // 1. Resize with DPR support for sharp images on retina displays
+      if (width) {
+        transformationArray.push(
+          transformations.Basic.resize({
+            width,
+            height: 0, // Auto height to maintain aspect ratio
+            fit: "cover", // Better cropping than default
+            dpr,
+          })
+        );
+      }
+
+      // 2. Apply sharpening to prevent blurry images (especially after resize)
+      const shouldSharpen =
+        options.sharpen !== false &&
+        IMAGE_OPTIMIZATION_CONFIG.SHARPEN.ENABLED;
+      if (shouldSharpen) {
+        const sharpness =
+          options.sharpness || IMAGE_OPTIMIZATION_CONFIG.SHARPEN.INTENSITY;
+        transformationArray.push(
+          transformations.Basic.sharpen({
+            sigma: sharpness,
+          })
+        );
+      }
+
+      // 3. Optimize image quality (reduces file size without visible quality loss)
+      const quality =
+        options.quality !== undefined
+          ? options.quality
+          : IMAGE_OPTIMIZATION_CONFIG.DEFAULT_QUALITY;
+      if (quality && quality !== 100) {
+        transformationArray.push(
+          transformations.Basic.compress({
+            quality,
+          })
+        );
+      }
+
+      // 4. Auto format conversion (WebP/AVIF for modern browsers)
+      const format = options.format || "auto";
+      if (format === "auto") {
+        // Let Pixelbin choose the best format based on browser support
+        transformationArray.push(
+          transformations.Basic.toFormat({
+            format: "webp", // WebP as fallback, browser will use AVIF if supported
+            quality,
+          })
+        );
+      } else if (format !== "original") {
+        transformationArray.push(
+          transformations.Basic.toFormat({
+            format,
+            quality,
+          })
+        );
+      }
+
+      updatedUrl = pixelbin
+        .image(obj.workerPath)
+        .setTransformation(...transformationArray)
+        .getUrl();
+    }
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn("Error processing the URL:", error.message);
+  }
+  return updatedUrl;
+};
+
+export function updateGraphQueryWithValue(mainString, replacements) {
+  if (!mainString || !replacements || !Array.isArray(replacements)) {
+    return mainString;
+  }
+  let mStr = mainString;
+  // Iterate over the replacements and replace each occurrence in the main string
+  replacements.forEach((replacement) => {
+    const [search, replaceWith] = replacement;
+    if (search && replaceWith) {
+      mStr = mainString.split(search).join(replaceWith);
+    }
+  });
+  return mStr;
+}
+
+export function throttle(func, wait) {
+  let waiting = false;
+
+  function throttleHandler(...args) {
+    if (waiting) {
+      return;
+    }
+
+    waiting = true;
+    setTimeout(function executeFunction() {
+      func.apply(this, args);
+      waiting = false;
+    }, wait);
+  }
+
+  return throttleHandler;
+}
+
+export const detectMobileWidth = () => {
+  if (isRunningOnClient()) {
+    if (window && window.screen?.width <= 768) {
+      return true;
+    }
+    return false;
+  }
+};
+
+export function sanitizeHTMLTag(data) {
+  return typeof data === "string"
+    ? data
+        .replace(/[<>"]/g, "")
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+    : "";
+}
+
+export function sanitizeMetaDescription(data) {
+  if (typeof data !== "string") return "";
+  return data
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, " ")
+    .replace(/"/g, "")
+    .trim();
+}
+
+export const getProductImgAspectRatio = (
+  global_config,
+  defaultAspectRatio = 0.8
+) => {
+  const productImgWidth = global_config?.product_img_width;
+  const productImgHeight = global_config?.product_img_height;
+  if (productImgWidth && productImgHeight) {
+    const aspectRatio = Number(productImgWidth / productImgHeight).toFixed(2);
+    return aspectRatio >= 0.6 && aspectRatio <= 1
+      ? aspectRatio
+      : defaultAspectRatio;
+  }
+
+  return defaultAspectRatio;
+};
+
+/**
+ * Format currency value with locale-aware number formatting
+ * Uses native Intl.NumberFormat for optimal performance
+ * @param {number|string} value - The numeric value to format
+ * @param {string} currencySymbol - Currency symbol (e.g., '₹', 'AED', 'USD')
+ * @param {string} locale - Locale string (e.g., 'en-IN' for India, 'en-AE' for UAE)
+ * @returns {string} Formatted currency string
+ */
+export const currencyFormat = (
+  value,
+  currencySymbol,
+  locale = "en-IN",
+  currencyCode = null
+) => {
+  if (value == null || value === "") return "";
+
+  // Convert to number if it's a string
+  const num = typeof value === "string" ? parseFloat(value) : value;
+
+  if (Number.isNaN(num)) return "";
+
+  // If currency code is provided, use it to determine locale
+  let finalLocale = locale;
+  if (currencyCode) {
+    finalLocale = getLocaleFromCurrency(currencyCode);
+  }
+
+  // Determine if we should use Indian numbering system
+  const isIndianLocale =
+    finalLocale === "en-IN" || finalLocale?.startsWith("en-IN");
+
+  try {
+    // Use Intl.NumberFormat for locale-aware formatting
+    const numberingSystem = isIndianLocale ? "latn" : undefined;
+    const localeString = numberingSystem
+      ? `${finalLocale}-u-nu-${numberingSystem}`
+      : finalLocale;
+
+    const formatter = new Intl.NumberFormat(localeString, {
+      maximumFractionDigits: 20,
+      useGrouping: true,
+    });
+
+    const formattedValue = formatter.format(num);
+
+    // Handle currency symbol placement
+    let finalResult;
+    if (currencySymbol) {
+      // For alphabetic currency codes (like AED, USD), add space
+      if (/^[A-Z]+$/.test(currencySymbol)) {
+        finalResult = `${currencySymbol} ${formattedValue}`;
+      } else {
+        // For symbol currencies (like ₹), no space
+        finalResult = `${currencySymbol}${formattedValue}`;
+      }
+    } else {
+      finalResult = formattedValue;
+    }
+
+    return finalResult;
+  } catch {
+    // Fallback to basic formatting if locale is invalid
+    // eslint-disable-next-line no-console
+    console.warn(
+      `Invalid locale "${finalLocale}", falling back to default formatting`
+    );
+    const formattedValue = num.toLocaleString("en-US");
+    if (currencySymbol && /^[A-Z]+$/.test(currencySymbol)) {
+      return `${currencySymbol} ${formattedValue}`;
+    }
+    if (currencySymbol) {
+      return `${currencySymbol}${formattedValue}`;
+    }
+    return formattedValue;
+  }
+};
+
+export function roundToDecimals(number, decimalPlaces = 2) {
+  const factor = 10 ** decimalPlaces;
+  return Math.round(number * factor) / factor;
+}
+
+/**
+ * Format price with currency symbol using locale-aware number formatting
+ * Uses native Intl.NumberFormat for optimal performance
+ * @param {string} symbol - Currency symbol (e.g., '₹', 'AED', 'USD')
+ * @param {number|string} price - The price value to format
+ * @param {string} locale - Locale string (e.g., 'en-IN' for India, 'en-AE' for UAE)
+ * @returns {string} Formatted price string with currency symbol
+ */
+export function priceFormatCurrencySymbol(
+  symbol,
+  price = 0,
+  locale = "en-IN",
+  currencyCode = null
+) {
+  if (price == null || price === "") return "";
+
+  // Convert to number if it's a string
+  let num = typeof price === "string" ? parseFloat(price) : price;
+
+  if (Number.isNaN(num)) return "";
+
+  // Round to 2 decimal places
+  num = roundToDecimals(num, 2);
+
+  // If currency code is provided, use it to determine locale
+  let finalLocale = locale;
+  if (currencyCode) {
+    finalLocale = getLocaleFromCurrency(currencyCode);
+  }
+
+  // Determine if we should use Indian numbering system
+  const isIndianLocale =
+    finalLocale === "en-IN" || finalLocale?.startsWith("en-IN");
+
+  try {
+    // Use Intl.NumberFormat for locale-aware formatting
+    const numberingSystem = isIndianLocale ? "latn" : undefined;
+    const localeString = numberingSystem
+      ? `${finalLocale}-u-nu-${numberingSystem}`
+      : finalLocale;
+
+    const formatter = new Intl.NumberFormat(localeString, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+      useGrouping: true,
+    });
+
+    const sign = num < 0 ? "- " : "";
+    const formattedPrice = formatter.format(Math.abs(num));
+    const hasAlphabeticCurrency = /^[A-Za-z]+$/.test(symbol);
+
+    // Handle currency symbol placement
+    let finalResult;
+    if (hasAlphabeticCurrency) {
+      finalResult = `${sign}${symbol} ${formattedPrice}`;
+    } else {
+      finalResult = `${sign}${symbol}${formattedPrice}`;
+    }
+
+    return finalResult;
+  } catch {
+    // Fallback to basic formatting if locale is invalid
+    // eslint-disable-next-line no-console
+    console.warn(
+      `Invalid locale "${finalLocale}", falling back to default formatting`
+    );
+    const formattedPrice = num.toLocaleString("en-US", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    });
+    const hasAlphabeticCurrency = /^[A-Za-z]+$/.test(symbol);
+    if (hasAlphabeticCurrency) {
+      return `${symbol} ${formattedPrice}`;
+    }
+    return `${symbol}${formattedPrice}`;
+  }
+}
+
+export const getReviewRatingData = (customMeta) => {
+  const data = {};
+
+  if (customMeta && customMeta.length) {
+    customMeta.forEach((item) => {
+      if (item.key) {
+        data[item.key] = Number(item?.value || "");
+      }
+    });
+
+    const avgRating = data.rating_sum / data.rating_count;
+
+    data.avg_ratings = Number(Number(avgRating).toFixed(1)) || 0;
+  }
+
+  return data;
+};
+export function removeCookie(name) {
+  if (isRunningOnClient()) {
+    document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+  }
+}
+
+export function getCookie(key) {
+  if (isRunningOnClient()) {
+    const name = `${key}=`;
+    const decoded = decodeURIComponent(document.cookie);
+    const cArr = decoded.split("; ");
+    let res;
+    cArr.forEach((val) => {
+      if (val.indexOf(name) === 0) res = val.substring(name.length);
+    });
+    if (!res) {
+      return "";
+    }
+    try {
+      return JSON.parse(res);
+    } catch (e) {
+      return res || null;
+    }
+  } else {
+    return null;
+  }
+}
+
+export const getValidLocales = (languagesList) => {
+  return languagesList.map((lang) => lang.locale);
+};
+
+const isValidLocale = (tag) => {
+  try {
+    new Intl.Locale(tag);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Map currency code to appropriate locale for number formatting
+ * @param {string} currencyCode - Currency code (e.g., 'USD', 'AED', 'INR')
+ * @returns {string} Locale string appropriate for the currency
+ */
+export const getLocaleFromCurrency = (currencyCode) => {
+  if (!currencyCode) return "en-US";
+
+  // Normalize currency code to uppercase for case-insensitive matching
+  const normalizedCode = currencyCode.toUpperCase();
+
+  const currencyLocaleMap = {
+    USD: "en-US", // United States
+    AED: "en-AE", // United Arab Emirates
+    SAR: "ar-SA", // Saudi Arabia
+    GBP: "en-GB", // United Kingdom
+    EUR: "en-US", // Europe (using en-US as standard international format)
+    INR: "en-IN", // India
+    // Add more currency mappings as needed
+  };
+
+  return currencyLocaleMap[normalizedCode] || "en-US"; // Default to en-US for unknown currencies
+};
+
+export const formatLocale = (locale, countryCode, isCurrencyLocale = false) => {
+  if ((locale === "en" || !locale) && isCurrencyLocale) {
+    return DEFAULT_CURRENCY_LOCALE;
+  }
+  if (locale === "en" || !locale) {
+    return DEFAULT_UTC_LOCALE;
+  }
+  const finalLocale = locale.includes("-")
+    ? locale
+    : `${locale}${countryCode ? "-" + countryCode : ""}`;
+  return isValidLocale(finalLocale) ? finalLocale : DEFAULT_UTC_LOCALE;
+};
+
+export const getDirectionAdaptiveValue = (cssProperty, value) => {
+  switch (cssProperty) {
+    case DIRECTION_ADAPTIVE_CSS_PROPERTIES.TEXT_ALIGNMENT:
+      return TEXT_ALIGNMENT_MAP[value];
+    case DIRECTION_ADAPTIVE_CSS_PROPERTIES.FLOAT:
+      return FLOAT_MAP[value];
+    default:
+      return value;
+  }
+};
+export function createFieldValidation(field, t) {
+  if (!field) return () => {};
+  const { slug, display_name, required, validation } = field;
+  const { type, regex } = validation || {};
+  if (slug === "phone") {
+    return (value) => {
+      if (required && !value?.mobile?.trim()) {
+        return `${display_name} ${t("resource.common.address.is_required")}`;
+      }
+      // If isValidNumber is explicitly false, fail validation
+      if (value && value.isValidNumber === false) {
+        return t("resource.common.address.invalid_phone_number");
+      }
+
+      // If isValidNumber is missing/undefined but we have a mobile number, validate it ourselves
+      if (value && value.mobile && value.isValidNumber === undefined) {
+        const mobileNumber = value.mobile.toString().replace(/[\s\-+]/g, "");
+        // Basic validation: check if it's a valid length (10 digits for most countries)
+        // For India (countryCode 91), validate Indian format
+        if (value.countryCode === "91" || !value.countryCode) {
+          if (mobileNumber.length !== 10) {
+            return t("resource.common.address.invalid_phone_number");
+          }
+          // Indian mobile numbers should start with 6-9
+          if (!/^[6-9]\d{9}$/.test(mobileNumber)) {
+            return t("resource.common.address.invalid_phone_number");
+          }
+        } else {
+          // For other countries, just check minimum length (at least 7 digits)
+          if (mobileNumber.length < 7) {
+            return t("resource.common.address.invalid_phone_number");
+          }
+        }
+        return true;
+      }
+
+      // If no value at all, fail
+      if (!value) {
+        return t("resource.common.address.invalid_phone_number");
+      }
+      return true;
+    };
+  }
+  return (v) => {
+    const value = v?.display_name || v;
+    const isEmptyOrWhitespace =
+      value == null ||
+      (typeof value === "string" && value.trim() === "");
+    if (required && isEmptyOrWhitespace) {
+      return `${display_name} ${t("resource.common.address.is_required")}.`;
+    }
+
+    if ((required || value) && type === "regex" && regex?.value) {
+      try {
+        const regExp = new RegExp(regex.value);
+        if (!regExp.test(value)) {
+          return `${t("resource.common.invalid")} ${display_name}`;
+        }
+      } catch (error) {
+        return `${t("resource.common.invalid")} ${display_name}`;
+      }
+    }
+    const { min, max } = regex?.length || {};
+    if (
+      (required || value) &&
+      ((max && value.length > max) || (min && value.length < min))
+    ) {
+      return `${display_name} ${t("resource.common.validation_length", { min: min || 0, max: max || "∞" })}`;
+    }
+    return true;
+  };
+}
+
+export function createLocalitiesPayload(slug, fieldsMap, values) {
+  if (!slug) return {};
+  const field = fieldsMap?.[slug];
+  let result = {};
+  if (field?.prev) {
+    result = {
+      ...result,
+      ...createLocalitiesPayload(field?.prev, fieldsMap, values),
+    };
+  }
+  result[slug] = values?.[slug]?.display_name || values?.[slug] || undefined;
+  return result;
+}
+
+export const resetScrollPosition = () => {
+  if (typeof window !== "undefined") {
+    window?.scrollTo({
+      top: 0,
+      left: 0,
+      behavior: "smooth",
+    });
+  }
+};
+
+export const getConfigFromProps = (props) => {
+  if (!props || typeof props !== "object") {
+    return {};
+  }
+
+  const getConfigValue = (key) => {
+    const prop = props[key];
+    if (!prop) return { [key]: undefined };
+
+    // Handle different prop structures
+    if (prop.value !== undefined) {
+      return { [key]: prop.value };
+    } else if (prop.type && prop.default !== undefined) {
+      return { [key]: prop.default };
+    } else {
+      return { [key]: prop };
+    }
+  };
+
+  return Object.keys(props)?.reduce(
+    (acc, curr) => ({ ...getConfigValue(curr), ...acc }),
+    {}
+  );
+};
+
+export function getLocalizedRedirectUrl(path = "", currentLocale) {
+  // Ensure path starts with a slash
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  // If we have a non-English locale and path doesn't already have it
+  if (
+    currentLocale &&
+    currentLocale !== "en" &&
+    !normalizedPath.startsWith(`/${currentLocale}`)
+  ) {
+    return `/${currentLocale}${normalizedPath}`;
+  }
+
+  return normalizedPath;
+}
+
+export const validateAccounHolder = (value) => {
+  // If empty, let the 'required' rule handle it
+  if (!value || !value.trim()) {
+    return true; // Changed from returning error message
+  }
+
+  const trimmedValue = value.trim();
+
+  // Check for numbers
+  if (/\d/.test(trimmedValue)) {
+    return "resource.refund_order.numbers_not_allowed_in_account_holder_name";
+  }
+
+  // Check for special characters
+  if (!/^[a-zA-Z\s.',-]+$/.test(trimmedValue)) {
+    return "resource.refund_order.special_characters_not_allowed_in_account_holder_name";
+  }
+
+  // Minimum length check
+  if (trimmedValue.length < 3) {
+    return "resource.refund_order.account_holder_name_should_be_at_least_3_characters";
+  }
+
+  // Maximum length check
+  if (trimmedValue.length > 50) {
+    return "resource.refund_order.account_holder_name_should_not_exceed_50_characters";
+  }
+
+  return true;
+};
+
+export const validateAccountNo = (value) => {
+  // If empty, let the 'required' rule handle it
+  if (!value) {
+    return true; // Changed from returning error message
+  }
+
+  const accountNumber = value.toString().replace(/\s/g, "");
+
+  // Check if it contains only digits
+  if (!/^\d+$/.test(accountNumber)) {
+    return "resource.refund_order.account_number_should_contain_only_numbers";
+  }
+
+  // Check minimum length
+  if (accountNumber.length < 9) {
+    return "resource.refund_order.account_number_should_be_at_least_9_digits";
+  }
+
+  // Check maximum length
+  if (accountNumber.length > 18) {
+    return "resource.refund_order.account_number_should_not_exceed_18_digits";
+  }
+
+  return true;
+};
+
+export function spaNavigate(path) {
+  // SSR / very old browsers
+  if (
+    typeof window === "undefined" ||
+    !window.history ||
+    !window.history.pushState
+  ) {
+    window.location.href = path;
+    return;
+  }
+
+  const current = window.location.pathname + window.location.search;
+  if (current === path) return; // no-op
+
+  window.history.pushState(null, "", path);
+  window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+export function translateDynamicLabel(input, t) {
+  // Early return for null, undefined, or non-string types
+  if (input == null || typeof input !== "string") {
+    return "";
+  }
+
+  // Handle empty string
+  const trimmedInput = input.trim();
+  if (trimmedInput === "") {
+    return "";
+  }
+
+  try {
+    const safeInput = trimmedInput
+      .toLowerCase()
+      .replace(/\//g, "_") // replace slashes with underscores
+      .replace(/[^a-z0-9_\s]/g, "") // remove special characters except underscores and spaces
+      .trim()
+      .replace(/\s+/g, "_"); // replace spaces with underscores
+
+    if (!safeInput) {
+      return trimmedInput;
+    }
+
+    const translationKey = `resource.dynamic_label.${safeInput}`;
+    const translated = t(translationKey);
+
+    return translated.split(".").pop() === safeInput
+      ? trimmedInput
+      : translated;
+  } catch (error) {
+    console.warn("Error in translateDynamicLabel:", error);
+    return typeof input === "string" ? input : "";
+  }
+}
+
+/**
+ * Checks if an error message is a generic JavaScript error that shouldn't be shown to users.
+ * These are typically internal errors that should be handled gracefully.
+ * Only meaningful API/validation errors should be displayed to users.
+ *
+ * @param {string|null|undefined} errorMessage - The error message to check
+ * @returns {boolean} - True if the error is a generic JS error, false otherwise
+ */
+export function isGenericJSError(errorMessage) {
+  // Early return for null, undefined, or non-string types
+  if (!errorMessage || typeof errorMessage !== "string") {
+    return false;
+  }
+
+  const errorLower = errorMessage.toLowerCase();
+
+  // Check for common generic JavaScript error patterns
+  const genericErrorPatterns = [
+    "cannot read properties",
+    "reading 'find'",
+    "reading 'map'",
+    "reading 'length'",
+    "reading 'slice'",
+    "reading 'filter'",
+    "reading 'reduce'",
+    "reading 'forEach'",
+    "reading 'push'",
+    "reading 'pop'",
+    "is not a function",
+    "is not defined",
+    "cannot read",
+    "typeerror",
+    "referenceerror",
+    "syntaxerror",
+    "rangeerror",
+    "undefined is not",
+    "null is not",
+  ];
+
+  // Check if error message contains any generic error patterns
+  const hasGenericPattern = genericErrorPatterns.some((pattern) =>
+    errorLower.includes(pattern)
+  );
+
+  // Also check for the specific pattern: "undefined" + "reading"
+  const hasUndefinedReadingPattern =
+    errorLower.includes("undefined") && errorLower.includes("reading");
+
+  return hasGenericPattern || hasUndefinedReadingPattern;
+}
+
+/**
+ * Validates if an error message is valid and should be displayed to users.
+ * Filters out generic JavaScript errors and empty/invalid messages.
+ *
+ * @param {string|null|undefined} errorMessage - The error message to validate
+ * @returns {boolean} - True if the error message is valid and should be displayed, false otherwise
+ */
+export function isValidErrorMessage(errorMessage) {
+  // Must be a non-empty string
+  if (!errorMessage || typeof errorMessage !== "string") {
+    return false;
+  }
+
+  // Must not be empty after trimming
+  if (errorMessage.trim() === "") {
+    return false;
+  }
+
+  // Must not be a generic JavaScript error
+  if (isGenericJSError(errorMessage)) {
+    return false;
+  }
+
+  return true;
+}
+export const getAddressStr = (item, isAddressTypeAvailable) => {
+  if (!item || typeof item !== "object") {
+    return "";
+  }
+  try {
+    const parts = [
+      item.address || "",
+      item.area || "",
+      item.landmark?.length > 0 ? item.landmark : "",
+      item.sector || "",
+      item.city || "",
+      item.state || "",
+    ].filter(Boolean);
+
+    if (isAddressTypeAvailable && item.address_type) {
+      parts.unshift(item.address_type);
+    }
+    let addressStr = parts.join(", ");
+    const postalCode = item.area_code || item.pincode;
+    if (postalCode) {
+      addressStr += ` ${postalCode}`;
+    }
+    if (item.country) {
+      // Handle country as object or string
+      const countryStr =
+        typeof item.country === "object"
+          ? item.country.display_name ||
+            item.country.name ||
+            item.country.uid ||
+            ""
+          : item.country;
+      if (countryStr) {
+        addressStr += `, ${countryStr}`;
+      }
+    }
+    return addressStr;
+  } catch (error) {
+    console.error("Error constructing address string:", error);
+    return "";
+  }
+};
+
+export const getAddressFromComponents = (components, name) => {
+  const typeToName = Object.fromEntries(
+    components.flatMap(({ long_name, short_name, types }) =>
+      types.map((type) => [type, { short_name, long_name }])
+    )
+  );
+
+  const address = [
+    name,
+    typeToName.premise?.long_name || null,
+    typeToName.street_number?.long_name || null,
+    typeToName.route?.long_name || null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return {
+    address: address || null,
+    area: typeToName["sublocality_level_2"]?.long_name || null,
+    landmark: typeToName["sublocality_level_1"]?.long_name || null,
+    city: typeToName["locality"]?.long_name || null,
+    state: typeToName["administrative_area_level_1"]?.long_name || null,
+    area_code: typeToName["postal_code"]?.long_name || null,
+    country: typeToName["country"]?.long_name || null,
+    country_iso_code: typeToName["country"]?.short_name || null,
+  };
+};
+
+export function getDefaultLocale(locales) {
+  const defaultLocaleObj = locales.find((item) => item.is_default === true);
+  return defaultLocaleObj ? defaultLocaleObj.locale : null;
+}
+
+export function isLocalePresent(locale, localesArray = []) {
+  return localesArray.some((item) => item.locale === locale);
+}
+
+export function addLocaleToShareCartUrl(url, locale, supportedLocales) {
+  try {
+    // Extract valid locale codes from supportedLocales.items
+    const validLocaleCodes = (supportedLocales?.items || []).map(
+      (item) => item.locale
+    );
+
+    if (!locale || locale === "en" || !validLocaleCodes.includes(locale))
+      return url;
+
+    const parsedUrl = new URL(url);
+    const pathSegments = parsedUrl.pathname.split("/").filter(Boolean);
+
+    // Replace the locale if one is already present
+    if (validLocaleCodes.includes(pathSegments[0])) {
+      pathSegments[0] = locale;
+    } else {
+      pathSegments.unshift(locale);
+    }
+
+    parsedUrl.pathname = "/" + pathSegments.join("/");
+    return parsedUrl.toString();
+  } catch (e) {
+    console.error("Invalid URL:", e);
+    return url;
+  }
+}
+
+export function getLocaleDirection(fpi) {
+  const dir = fpi?.store?.getState()?.custom?.currentLocaleDetails?.direction;
+  return dir || "ltr";
+}
+
+export function getDiscountPercentage({ markedPrice, effectivePrice }) {
+  if (markedPrice === effectivePrice) return;
+  return Math.floor(((markedPrice - effectivePrice) / markedPrice) * 100);
+}
+
+export function getGroupedShipmentBags(
+  bags,
+  { includePromoBags = true, isPartialCheck = false } = {}
+) {
+  if (!bags) {
+    return {
+      bags: [],
+      bundleGroups: {},
+      bundleGroupArticles: {},
+      freeGiftGroups: {},
+    };
+  }
+
+  const shipmentBags = [];
+  const bundleGroups = new Map();
+  const bundleGroupArticles = new Map();
+  const hasBaseInBag = new Set();
+  const bundleGroupRepresentative = new Map(); // Track first item of each bundle group
+  const freeGiftGroups = new Map(); // Track free gift items grouped by parent bag ID
+
+  for (const bag of bags) {
+    const bundleDetails = bag?.bundle_details;
+    const bundleGroupId = bundleDetails?.bundle_group_id;
+    const isBase = !!bundleDetails?.is_base;
+    const isPartialReturn =
+      !!bundleDetails?.return_config?.allow_partial_return;
+
+    // Check if this is a free gift item
+    const isFreeGiftItem = bag?.meta?.extra_meta?.is_free_gift_item === true;
+    const parentPromoBags = bag?.parent_promo_bags || {};
+    const parentBagIds = Object.keys(parentPromoBags);
+
+    // Skip free gift items from main bag list (they'll be grouped under parent)
+    if (isFreeGiftItem && parentBagIds.length > 0) {
+      // Group free gifts by parent bag ID
+      parentBagIds.forEach((parentBagId) => {
+        if (!freeGiftGroups.has(parentBagId)) {
+          freeGiftGroups.set(parentBagId, []);
+        }
+        freeGiftGroups.get(parentBagId).push(bag);
+      });
+      continue; // Skip adding to main shipmentBags
+    }
+
+    if (!includePromoBags && parentBagIds.length > 0) {
+      continue;
+    }
+
+    if (bundleGroupId && (!isPartialCheck || !isPartialReturn)) {
+      if (isBase && !hasBaseInBag.has(bundleGroupId)) {
+        shipmentBags.push(bag);
+        hasBaseInBag.add(bundleGroupId);
+      } else if (
+        !isBase &&
+        !hasBaseInBag.has(bundleGroupId) &&
+        !bundleGroupRepresentative.has(bundleGroupId)
+      ) {
+        // If no base item exists yet, use the first child item as representative
+        bundleGroupRepresentative.set(bundleGroupId, bag);
+      }
+
+      if (!bundleGroups.has(bundleGroupId)) {
+        bundleGroups.set(bundleGroupId, []);
+        bundleGroupArticles.set(bundleGroupId, new Map());
+      }
+      bundleGroups.get(bundleGroupId).push(bag);
+      bundleGroupArticles
+        .get(bundleGroupId)
+        .set(bundleDetails?.article_bundle_id, bag);
+    } else {
+      shipmentBags.push(bag);
+    }
+  }
+
+  // Add representative items for bundle groups that have no base item
+  for (const [bundleGroupId, representativeBag] of bundleGroupRepresentative) {
+    if (!hasBaseInBag.has(bundleGroupId)) {
+      shipmentBags.push(representativeBag);
+    }
+  }
+
+  return {
+    bags: shipmentBags,
+    bundleGroups: Object.fromEntries(bundleGroups),
+    bundleGroupArticles: Object.fromEntries(
+      [...bundleGroupArticles].map(([id, articles]) => [
+        id,
+        [...articles.values()],
+      ])
+    ),
+    freeGiftGroups: Object.fromEntries(freeGiftGroups),
+  };
+}
+
+/**
+ * Format time from hour and minute to 12-hour format with lowercase am/pm
+ * @param {number} hour - Hour in 24-hour format (0-23)
+ * @param {number} minute - Minute (0-59)
+ * @returns {string} Formatted time string (e.g., "8:00am", "11:30pm")
+ */
+export const formatStoreTime = (hour, minute) => {
+  const period = hour >= 12 ? "pm" : "am";
+  const displayHour = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+  const displayMinute = minute.toString().padStart(2, "0");
+  return `${displayHour}:${displayMinute}${period}`;
+};
+
+/**
+ * Get today's weekday name
+ * @returns {string} Weekday name (e.g., "Monday", "Tuesday")
+ */
+export const getTodayWeekday = () => {
+  const days = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
+  return days[new Date().getDay()];
+};
+
+/**
+ * Format order acceptance timing for today
+ * @param {Array} timingArray - Array of timing objects with weekday, open, opening, and closing properties
+ * @returns {string|null} Formatted timing string (e.g., "Open today: 8:00am - 11:00pm") or null if no timing found
+ */
+export const formatOrderAcceptanceTiming = (timingArray) => {
+  if (!timingArray || !Array.isArray(timingArray) || timingArray.length === 0) {
+    return null;
+  }
+
+  // Get today's weekday
+  const todayWeekday = getTodayWeekday();
+
+  // Find today's timing - try exact match first, then case-insensitive
+  let todayTiming = timingArray.find(
+    (day) => day.weekday === todayWeekday && day.open === true
+  );
+
+  // If not found, try case-insensitive match
+  if (!todayTiming) {
+    todayTiming = timingArray.find(
+      (day) =>
+        day.weekday?.toLowerCase() === todayWeekday.toLowerCase() &&
+        day.open === true
+    );
+  }
+
+  // If still not found, try to find any open day as fallback
+  if (!todayTiming) {
+    todayTiming = timingArray.find((day) => day.open === true);
+  }
+
+  // Validate that we have the required data structure
+  if (
+    !todayTiming ||
+    !todayTiming.opening ||
+    typeof todayTiming.opening.hour !== "number" ||
+    typeof todayTiming.opening.minute !== "number" ||
+    !todayTiming.closing ||
+    typeof todayTiming.closing.hour !== "number" ||
+    typeof todayTiming.closing.minute !== "number"
+  ) {
+    return null;
+  }
+
+  // Format as "Open today: [opening]am - [closing]pm"
+  const openingTime = formatStoreTime(
+    todayTiming.opening.hour,
+    todayTiming.opening.minute
+  );
+  const closingTime = formatStoreTime(
+    todayTiming.closing.hour,
+    todayTiming.closing.minute
+  );
+
+  return `Open today: ${openingTime} - ${closingTime}`;
+};
+
+export const isSizeSelectable = (sizeItem, isMto) => {
+  if (!sizeItem) return false;
+  if (isMto) return true;
+
+  const quantity =
+    typeof sizeItem.quantity === "number" ? sizeItem.quantity : 0;
+  const isExplicitlyUnavailable = sizeItem.is_available === false;
+
+  return quantity > 0 && !isExplicitlyUnavailable;
+};
+
+export const pickSelectableSize = ({
+  sizesList = [],
+  urlSizeValue = "",
+  isMto = false,
+} = {}) => {
+  if (!Array.isArray(sizesList) || sizesList.length === 0) {
+    return null;
+  }
+
+  const normalizedUrlSize = urlSizeValue || "";
+  let selectedFromUrl = null;
+
+  if (normalizedUrlSize) {
+    selectedFromUrl = sizesList.find(
+      (item) => item?.value === normalizedUrlSize
+    );
+  }
+
+  // If URL size exists and is selectable, prefer it
+  if (selectedFromUrl && isSizeSelectable(selectedFromUrl, isMto)) {
+    return selectedFromUrl;
+  }
+
+  let fallbackSize = null;
+
+  if (selectedFromUrl) {
+    const urlIndex = sizesList.findIndex(
+      (item) => item?.value === selectedFromUrl.value
+    );
+
+    if (urlIndex !== -1) {
+      // Try next sizes after the URL size
+      fallbackSize = sizesList
+        .slice(urlIndex + 1)
+        .find((item) => isSizeSelectable(item, isMto));
+
+      // If none after, try sizes before the URL size
+      if (!fallbackSize) {
+        fallbackSize = sizesList
+          .slice(0, urlIndex)
+          .find((item) => isSizeSelectable(item, isMto));
+      }
+    }
+  }
+
+  // If still no fallback (no/invalid URL size or all around are invalid),
+  // pick the first selectable size or just the first size.
+  if (!fallbackSize) {
+    fallbackSize = sizesList.find((item) => isSizeSelectable(item, isMto));
+  }
+
+  return fallbackSize || sizesList[0] || null;
+};
+
+/**
+ * Transforms _custom_json._display options into accordion-ready content.
+ * Used by order-status (and cart chip-item when using theme-template).
+ * Excludes options where alt === "Template Name". Never adds price.
+ * @param {Array} rawOptions - From _custom_json._display
+ * @returns {Array} Accordion content (filtered, transformed, no price)
+ */
+const buildCanvasChildren = (val) => {
+  const children = [];
+  if (val.text != null) children.push({ key: "text", value: val.text });
+  if (val.previewImage) {
+    children.push({ key: "preview", value: { imageUrl: val.previewImage } });
+  }
+  return children;
+};
+
+const isCanvasLike = (val) =>
+  val &&
+  typeof val === "object" &&
+  !Array.isArray(val) &&
+  ("text" in val || "previewImage" in val);
+
+const transformDisplayHandlers = {
+  number: (opt) => ({
+    key: opt.key,
+    children: [{ key: "value", value: opt.value }],
+  }),
+  imageUpload: (opt) => {
+    const url = opt.value ?? opt.url;
+    if (url == null) return { key: opt.key, children: [] };
+    return {
+      key: opt.key,
+      children: [{ key: "value", value: { imageUrl: url } }],
+    };
+  },
+  dropdownImage: (opt) => ({
+    key: opt.key,
+    children: [{ key: "value", value: opt.value }],
+  }),
+  productCanvas: (opt) => {
+    const canvasData = opt.value;
+    if (!canvasData || typeof canvasData !== "object") {
+      return { key: opt.key, children: [] };
+    }
+    return { key: opt.key, children: buildCanvasChildren(canvasData) };
+  },
+};
+
+const transformDisplayDefaultHandler = (opt) => {
+  const val = opt.value;
+  if (isCanvasLike(val)) {
+    return { key: opt.key, children: buildCanvasChildren(val) };
+  }
+  return { key: opt.key, children: [{ key: "value", value: opt.value }] };
+};
+
+export const transformDisplayToAccordionContent = (rawOptions = []) => {
+  const options = Array.isArray(rawOptions) ? rawOptions : [];
+  return options
+    .filter((opt) => opt && opt.alt !== "Template Name")
+    .map((opt) => {
+      const customType = opt.customType || opt.type;
+      const fn =
+        transformDisplayHandlers[customType] || transformDisplayDefaultHandler;
+      return fn(opt);
+    })
+    .filter((item) => item.children?.length > 0);
+};

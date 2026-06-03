@@ -1,0 +1,771 @@
+import React, { useState, useEffect, useRef, Suspense } from "react";
+import PicZoom from "../pic-zoom/pic-zoom";
+import FyImage from "@gofynd/theme-template/components/core/fy-image/fy-image";
+import "@gofynd/theme-template/components/core/fy-image/fy-image.css";
+import {
+  getProductImgAspectRatio,
+  isRunningOnClient,
+  getEffectiveCarouselControls,
+  isValidCustomBadge,
+} from "../../../../helper/utils";
+import styles from "./image-gallery.less";
+import MobileSlider from "../mobile-slider/mobile-slider";
+import VideoPlayIcon from "../../../../assets/images/video-play.svg";
+import ThreeDIcon from "../../../../assets/images/3D.svg";
+import CarouselNavArrowIcon from "../../../../assets/images/carousel-nav-arrow.svg";
+import ArrowLeftIcon from "../../../../assets/images/arrow-left.svg";
+import ArrowRightIcon from "../../../../assets/images/arrow-right.svg";
+import { useGlobalTranslation } from "fdk-core/utils";
+import { Skeleton } from "../../../../components/core/skeletons";
+import { createPortal } from "react-dom";
+import WishlistIcon from "../../../../assets/images/wishlist";
+import { useFPI,useGlobalStore } from "fdk-core/utils";
+const LightboxImage = React.lazy(
+  () => import("../lightbox-image/lightbox-image")
+);
+
+function PdpImageGallery({
+  isLoading,
+  images = [],
+  displayThumbnail = true,
+  isCustomOrder = false,
+  iconColor = "",
+  globalConfig = {},
+  followed,
+  removeFromWishlist,
+  addToWishList,
+  hiddenDots = false,
+  slideTabCentreNone = true,
+  hideImagePreview = false,
+  handleShare,
+  showShareIcon = true,
+  imgSources = [],
+  // Sale tag props (configuration-based)
+  showSaleTag = false,
+  showCustomBadge = true, // Platform setting: show_custom_badge (teaser_tag)
+  displayMode = "carousel", // "carousel", "vertical", or "vertical-with-thumbnail"
+  onLightboxStateChange, // Callback to notify parent about lightbox state
+  productDetails: productDetailsProp = null,
+}) {
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [enableLightBox, setEnableLightBox] = useState(false);
+  const [resumeVideo, setResumeVideo] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const { t } = useGlobalTranslation("translation");
+  const itemWrapperRef = useRef(null);
+  const thumbnailSidebarRef = useRef(null);
+  const mainImagesRefs = useRef([]);
+  const verticalContainerRef = useRef(null);
+  const fpi = useFPI();
+  const product = useGlobalStore(fpi.getters.PRODUCT);
+  const productDetails = productDetailsProp ?? product?.product_details;
+
+  // Mobile/tablet carousel controls from carousel_controls_mobile setting
+  const { showArrows: mobileShowArrows, showDots: mobileShowDots } =
+    getEffectiveCarouselControls(
+      globalConfig,
+      false, // isDesktop - MobileSlider is for tablet/mobile only
+      images?.length ?? 0,
+      1 // itemsPerViewport - one image at a time on mobile
+    );
+
+  const handleVerticalContainerWheel = (event) => {
+    const container = verticalContainerRef.current;
+    if (!container) return;
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const { deltaY } = event;
+    const atBottom = scrollTop + clientHeight >= scrollHeight - 1;
+    const pageAtTop = window.scrollY <= 0;
+
+    // Prefer scrolling the page first when scrolling up
+    if (deltaY < 0) {
+      if (!pageAtTop) {
+        event.preventDefault();
+        window.scrollBy({ top: deltaY, left: 0 });
+        return;
+      }
+      // Page is already at top; allow container to process upward scroll
+      return;
+    }
+
+    // When scrolling down and container reached bottom, pass scroll to page
+    if (deltaY > 0 && atBottom) {
+      event.preventDefault();
+      window.scrollBy({ top: deltaY, left: 0 });
+    }
+  };
+
+  const currentMedia = {
+    src: images?.[currentImageIndex]?.url || "",
+    type: images?.[currentImageIndex]?.type || "",
+    alt: images?.[currentImageIndex]?.alt || "",
+  };
+
+  useEffect(() => {
+    if (isRunningOnClient()) {
+      const classList = document.body?.classList;
+
+      if (enableLightBox && classList) {
+        classList.add("remove-scroll");
+      } else {
+        classList.remove("remove-scroll");
+      }
+    }
+
+    // Notify parent component about lightbox state change
+    if (onLightboxStateChange) {
+      onLightboxStateChange(enableLightBox);
+    }
+  }, [enableLightBox, onLightboxStateChange]);
+
+  // Track previous images to detect product changes vs image updates
+  const prevImagesRef = useRef(null);
+  const prevIndexRef = useRef(0);
+
+  useEffect(() => {
+    const prevImages = prevImagesRef.current;
+    const prevIndex = prevIndexRef.current;
+
+    // Initial load or images array became empty
+    if (!prevImages || images.length === 0) {
+      setCurrentImageIndex(0);
+      prevImagesRef.current = images;
+      prevIndexRef.current = 0;
+      return;
+    }
+
+    // Check if first image URL changed (indicates new product or prepended images)
+    const currentFirstUrl = images?.[0]?.url || "";
+    const prevFirstUrl = prevImages?.[0]?.url || "";
+
+    if (currentFirstUrl !== prevFirstUrl) {
+      // First image changed - could be new product or prepended images
+      const currentImageUrl = prevImages?.[prevIndex]?.url;
+
+      if (currentImageUrl) {
+        // Try to find the same image in the new array
+        const newIndex = images.findIndex(
+          (img) => img?.url === currentImageUrl
+        );
+        if (newIndex >= 0) {
+          // Found the same image - images were prepended
+          // Show the first new image (index 0) when extension adds images
+          setCurrentImageIndex(0);
+          prevIndexRef.current = 0;
+        } else {
+          // Image not found - reset to 0 (new product or image removed)
+          setCurrentImageIndex(0);
+          prevIndexRef.current = 0;
+        }
+      } else {
+        // No previous image - reset to 0
+        setCurrentImageIndex(0);
+        prevIndexRef.current = 0;
+      }
+    } else {
+      // Same first image - images array reference changed but content is same
+      // Preserve current index, only adjust if out of bounds
+      setCurrentImageIndex((currentIndex) => {
+        if (currentIndex >= images.length) {
+          const newIndex = Math.max(0, images.length - 1);
+          prevIndexRef.current = newIndex;
+          return newIndex;
+        }
+        // Preserve current index - no change needed
+        prevIndexRef.current = currentIndex;
+        return currentIndex;
+      });
+    }
+
+    // Update refs
+    prevImagesRef.current = images;
+  }, [images]);
+
+  // Auto-scroll active thumbnail into view for vertical-with-thumbnail mode
+  useEffect(() => {
+    if (
+      displayMode === "vertical-with-thumbnail" &&
+      thumbnailSidebarRef.current
+    ) {
+      const activeThumbnail =
+        thumbnailSidebarRef.current.querySelector(".activeThumbnail");
+      if (activeThumbnail) {
+        activeThumbnail.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+          inline: "nearest",
+        });
+      }
+    }
+  }, [currentImageIndex, displayMode]);
+
+  // Intersection observer to auto-update currentImageIndex based on container scroll
+  useEffect(() => {
+    if (displayMode !== "vertical-with-thumbnail" || !isRunningOnClient()) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const index = parseInt(entry.target.dataset.imageIndex, 10);
+            if (!Number.isNaN(index)) {
+              setCurrentImageIndex(index);
+            }
+          }
+        });
+      },
+      {
+        root: verticalContainerRef.current,
+        rootMargin: "-50% 0px -50% 0px", // Trigger when image is in center of container viewport
+        threshold: 0,
+      }
+    );
+
+    const currentRefs = mainImagesRefs.current;
+    currentRefs.forEach((ref) => {
+      if (ref) observer.observe(ref);
+    });
+
+    return () => {
+      currentRefs.forEach((ref) => {
+        if (ref) observer.unobserve(ref);
+      });
+    };
+  }, [displayMode, images]);
+
+  // Rely on CSS overscroll-behavior to prevent page scroll chaining
+
+  const setMainImage = (e, index) => {
+    e.preventDefault();
+    if (index >= 0) {
+      setCurrentImageIndex(index);
+    }
+  };
+
+  const getImageURL = (srcUrl) =>
+    /* eslint-disable no-unsafe-optional-chaining */
+    `http://img.youtube.com/vi/${srcUrl?.substr(srcUrl?.lastIndexOf("/") + 1)}/0.jpg`;
+
+  const prevSlide = () => {
+    if (currentImageIndex === 0) {
+      return;
+    } // cannot move backward
+    if (!hiddenDots) {
+      itemWrapperRef.current.scrollLeft -= 75;
+    }
+    setCurrentImageIndex((prevIndex) => prevIndex - 1);
+  };
+
+  const nextSlide = () => {
+    if (currentImageIndex === images.length - 1) {
+      return;
+    } // cannot move forward
+    if (!hiddenDots) {
+      itemWrapperRef.current.scrollLeft += 75;
+    }
+    setCurrentImageIndex((prevIndex) => prevIndex + 1);
+  };
+
+  const handlePrevArrowClick = (e) => {
+    if (currentImageIndex <= 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    prevSlide();
+  };
+
+  const handleNextArrowClick = (e) => {
+    if (currentImageIndex >= images.length - 1) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    nextSlide();
+  };
+
+  const openGallery = (index = 0) => {
+    setSelectedImageIndex(index);
+    setEnableLightBox(true);
+  };
+
+  const openGalleryFromCarousel = () => {
+    setSelectedImageIndex(currentImageIndex);
+    setEnableLightBox(true);
+  };
+
+  const renderTag = () => {
+    if (!productDetails) return null;
+    // Check conditions in order of priority
+    if (!productDetails.sizes?.sellable) {
+      // Out of stock
+      return (
+        <div className={`${styles.saleTag} `}>
+          <span>{t("resource.common.out_of_stock")}</span>
+        </div>
+      );
+    } else if (
+      isValidCustomBadge(productDetails.teaser_tag) &&
+      showCustomBadge
+    ) {
+      // Custom badge (teaser_tag) - controlled by platform show_custom_badge
+      return (
+        <div className={styles.saleTag}>
+          <span>{productDetails.teaser_tag.substring(0, 14)}</span>
+        </div>
+      );
+    } else if (
+      (productDetails.discount ||
+        productDetails.attributes?.discount ||
+        productDetails.sizes?.discount) &&
+      productDetails.sizes?.sellable &&
+      showSaleTag
+    ) {
+      // Sale badge
+      return (
+        <div className={`${styles.saleTag} `}>
+          <span>{t("resource.common.sale")}</span>
+        </div>
+      );
+    }
+    return null;
+  };
+  // Render Carousel Mode
+  const renderCarouselMode = () => (
+    <div
+      className={`${styles.imageGallery} ${styles.desktop}`}
+      data-carousel="root"
+      data-carousel-mode="carousel"
+    >
+      <div className={styles.flexAlignCenter} data-carousel="wrapper">
+        <div
+          className={`${styles.carouselArrow} ${
+            styles["carouselArrow--left"]
+          } ${currentImageIndex <= 0 ? styles.disableArrow : ""}`}
+          onClick={handlePrevArrowClick}
+          data-carousel="nav-prev"
+          data-carousel-arrow="prev"
+          onMouseDown={(e) => {
+            if (currentImageIndex <= 0) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
+        >
+          <CarouselNavArrowIcon />
+        </div>
+        <div
+          className={styles.imageBox}
+          data-carousel="main"
+          data-carousel-current-index={currentImageIndex}
+        >
+          {isLoading ? (
+            <Skeleton
+              width={"100%"}
+              aspectRatio={getProductImgAspectRatio(globalConfig)}
+            />
+          ) : (
+            <PicZoom
+              customClass={styles.imageItem}
+              source={currentMedia.src}
+              type={currentMedia.type}
+              alt={currentMedia.alt}
+              currentIndex={currentImageIndex}
+              sources={imgSources}
+              onClickImage={openGalleryFromCarousel}
+              resumeVideo={resumeVideo}
+              globalConfig={globalConfig}
+              followed={followed}
+              removeFromWishlist={removeFromWishlist}
+              addToWishList={addToWishList}
+              hideImagePreview={hideImagePreview}
+            />
+          )}
+          <div className={styles.saleTagContainer}>
+            {renderTag()}
+          </div>
+          {isCustomOrder && (
+            <div className={`${styles.badge} ${styles.b4}`}>
+              {t("resource.product.made_to_order")}
+            </div>
+          )}
+        </div>
+        <div
+          className={`${styles.carouselArrow} ${
+            currentImageIndex >= images.length - 1 ? styles.disableArrow : ""
+          }`}
+          onClick={handleNextArrowClick}
+          onMouseDown={(e) => {
+            if (currentImageIndex >= images.length - 1) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
+          data-carousel="nav-next"
+          data-carousel-arrow="next"
+        >
+          <CarouselNavArrowIcon />
+        </div>
+      </div>
+
+      {!hiddenDots && (
+        <div
+          className={`${styles.thumbSlider} ${
+            displayThumbnail ? "" : styles.hidden
+          }}`}
+          data-carousel="thumbnails"
+        >
+          <div
+            className={`${styles.thumbWrapper} ${
+              images && images.length < 5 ? styles.removeWidth : ""
+            }`}
+            data-carousel="thumbnails-wrapper"
+          >
+            <button
+              type="button"
+              className={`${styles.prevBtn} ${styles.btnNavGallery}`}
+              onClick={prevSlide}
+              aria-label={t("resource.facets.prev")}
+              data-carousel="thumb-nav-prev"
+            >
+              <ArrowLeftIcon
+                className={`${
+                  currentImageIndex <= 0 ? styles.disableArrow : ""
+                } ${styles.navArrowIcon}`}
+              />
+            </button>
+            <ul
+              ref={itemWrapperRef}
+              className={`${styles.thumbnailList} ${
+                styles.scrollbarHidden
+              } ${images && images?.length < 5 ? styles.fitContent : ""}`}
+              data-carousel="thumbnail-list"
+            >
+              {/* eslint-disable jsx-a11y/no-noninteractive-element-interactions */}
+              {images.map((item, index) =>
+                isLoading ? (
+                  <Skeleton
+                    width={"100%"}
+                    aspectRatio={getProductImgAspectRatio(globalConfig)}
+                  />
+                ) : (
+                  <li
+                    key={index}
+                    onClick={(e) => setMainImage(e, index)}
+                    className={`${styles.thumbnail} ${
+                      item.type === "video" ? styles.flexAlign : ""
+                    } ${currentImageIndex === index ? styles.active : ""}`}
+                    style={{ "--icon-color": iconColor }}
+                    data-carousel="thumbnail-item"
+                    data-carousel-index={index}
+                    data-carousel-active={currentImageIndex === index}
+                  >
+                    {item.type === "image" && (
+                      <FyImage
+                        customClass={`${styles["thumbnailList--item"]}`}
+                        src={item?.url}
+                        alt={item?.alt}
+                        aspectRatio={getProductImgAspectRatio(globalConfig)}
+                        sources={[{ width: 100 }]}
+                        globalConfig={globalConfig}
+                        isImageFill={globalConfig?.img_fill}
+                      />
+                    )}
+                    {item.type === "video" && (
+                      <>
+                        {item.url.includes("youtube") ? (
+                          <img
+                            className={`${styles["thumbnailList--item"]} ${styles.videoThumbnail}`}
+                            src={getImageURL(item.url)}
+                            alt={item.alt}
+                          />
+                        ) : (
+                          <video
+                            className={`${styles["thumbnailList--item"]} ${styles.videoThumbnail}`}
+                            src={item?.url}
+                          />
+                        )}
+                        <VideoPlayIcon className={styles.videoPlayIcon} />
+                      </>
+                    )}
+                    {item.type === "3d_model" && (
+                      <ThreeDIcon className={styles.modelIcon} />
+                    )}
+                  </li>
+                )
+              )}
+            </ul>
+            <button
+              type="button"
+              className={`${styles.nextBtn} ${styles.btnNavGallery}`}
+              onClick={nextSlide}
+              aria-label={t("resource.facets.next")}
+              data-carousel="thumb-nav-next"
+            >
+              <ArrowRightIcon
+                className={`${
+                  currentImageIndex >= images.length - 1
+                    ? styles.disableArrow
+                    : ""
+                } ${styles.navArrowIcon}`}
+              />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // Render Vertical Mode
+  const renderVerticalMode = () => (
+    <div
+      className={`${styles.imageGallery} ${styles.desktop}`}
+      data-carousel="root"
+      data-carousel-mode="vertical"
+    >
+      <div className={styles.verticalImageContainer} data-carousel="track">
+        {images.map((item, index) => (
+          <div
+            key={index}
+            className={styles.verticalImageItem}
+            data-carousel="item"
+            data-carousel-index={index}
+          >
+            <PicZoom
+              customClass={styles.imageItem}
+              source={item.url}
+              type={item.type}
+              alt={item.alt}
+              currentIndex={index}
+              sources={imgSources}
+              onClickImage={openGallery.bind(null, index)}
+              resumeVideo={resumeVideo}
+              globalConfig={globalConfig}
+              followed={followed}
+              removeFromWishlist={removeFromWishlist}
+              addToWishList={addToWishList}
+              hideImagePreview={hideImagePreview}
+              showWishlist={images.length === 1 ? index === 0 : index === 1}
+            />
+            {/* Sale Tag - Configuration-based */}
+            {/* {showSaleTag && (
+              <div>
+                <span className={styles.saleTag}>
+                  {t("resource.common.sale")}
+                </span>
+              </div>
+            )} */}
+            <div className={styles.saleTagContainer}>
+              {renderTag()}
+            </div>
+            {isCustomOrder && index === 0 && (
+              <div className={`${styles.badge} ${styles.b4}`}>
+                {t("resource.product.made_to_order")}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  // Render Vertical with Thumbnail Mode
+  const renderVerticalWithThumbnailMode = () => (
+    <div
+      className={`${styles.imageGallery} ${styles.desktop} ${styles.verticalWithThumbnailLayout}`}
+      data-carousel="root"
+      data-carousel-mode="vertical-with-thumbnail"
+    >
+      <div
+        className={styles.verticalWithThumbnailContainer}
+        ref={verticalContainerRef}
+        onWheel={handleVerticalContainerWheel}
+        data-carousel="wrapper"
+      >
+        {/* Thumbnail Sidebar */}
+        <div
+          className={styles.thumbnailSidebar}
+          ref={thumbnailSidebarRef}
+          data-carousel="thumbnails"
+        >
+          <div
+            className={styles.thumbnailListVertical}
+            data-carousel="thumbnail-list"
+          >
+            {images.map((item, index) => (
+              <div
+                key={index}
+                className={`${styles.thumbnailItem} ${
+                  currentImageIndex === index ? styles.activeThumbnail : ""
+                }`}
+                data-carousel="thumbnail-item"
+                data-carousel-index={index}
+                data-carousel-active={currentImageIndex === index}
+                onClick={() => {
+                  setCurrentImageIndex(index);
+                  // Smooth scroll to corresponding main image
+                  if (
+                    displayMode === "vertical-with-thumbnail" &&
+                    mainImagesRefs.current[index]
+                  ) {
+                    mainImagesRefs.current[index].scrollIntoView({
+                      behavior: "smooth",
+                      block: "center",
+                    });
+                  }
+                }}
+                style={{ "--icon-color": iconColor }}
+              >
+                {item.type === "image" && (
+                  <FyImage
+                    customClass={styles.thumbnailImage}
+                    src={item?.url}
+                    alt={item?.alt}
+                    aspectRatio={getProductImgAspectRatio(globalConfig)}
+                    sources={[{ width: 80 }]}
+                    globalConfig={globalConfig}
+                    isImageFill={globalConfig?.img_fill}
+                  />
+                )}
+                {item.type === "video" && (
+                  <div className={styles.thumbnailVideoContainer}>
+                    {item.url.includes("youtube") ? (
+                      <img
+                        className={styles.thumbnailImage}
+                        src={getImageURL(item.url)}
+                        alt={item.alt}
+                      />
+                    ) : (
+                      <video
+                        className={styles.thumbnailImage}
+                        src={item?.url}
+                      />
+                    )}
+                    <VideoPlayIcon className={styles.videoPlayIcon} />
+                  </div>
+                )}
+                {item.type === "3d_model" && (
+                  <div className={styles.thumbnail3DContainer}>
+                    <ThreeDIcon className={styles.modelIcon} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Main Images Vertical Line */}
+        <div className={styles.mainImagesArea} data-carousel="main">
+          <div className={styles.mainImagesVertical} data-carousel="track">
+            {images.map((item, index) => (
+              <div
+                key={index}
+                className={styles.mainImageItem}
+                ref={(el) => {
+                  mainImagesRefs.current[index] = el;
+                }}
+                data-image-index={index}
+                data-carousel="item"
+                data-carousel-index={index}
+              >
+                <PicZoom
+                  customClass={styles.imageItem}
+                  source={item.url}
+                  type={item.type}
+                  alt={item.alt}
+                  currentIndex={index}
+                  sources={imgSources}
+                  onClickImage={openGallery.bind(null, index)}
+                  resumeVideo={resumeVideo}
+                  globalConfig={globalConfig}
+                  followed={followed}
+                  removeFromWishlist={removeFromWishlist}
+                  addToWishList={addToWishList}
+                  hideImagePreview={hideImagePreview}
+                  showWishlist={false}
+                />
+                <div className={styles.saleTagContainer}>
+                  {renderTag()}
+                </div>
+                {isCustomOrder && index === 0 && (
+                  <div className={`${styles.badge} ${styles.b4}`}>
+                    {t("resource.product.made_to_order")}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            aria-label={t("resource.common.breadcrumb.wishlist")}
+            className={`${styles.wishlistIcon} ${followed ? styles.activeWishlist : ""}`}
+            onClick={(e) =>
+              followed ? removeFromWishlist(e) : addToWishList(e)
+            }
+          >
+            <WishlistIcon isActive={followed} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderByMode = () => {
+    if (displayMode === "carousel") {
+      return renderCarouselMode();
+    }
+    if (displayMode === "vertical-with-thumbnail") {
+      return renderVerticalWithThumbnailMode();
+    }
+    return renderVerticalMode();
+  };
+
+  return (
+    <div className={styles.galleryBox} data-carousel-gallery="root">
+      {renderByMode()}
+
+      <div className={styles.mobile} data-carousel="mobile-wrapper">
+        <MobileSlider
+          images={images}
+          onImageClick={() => openGallery()}
+          isCustomOrder={isCustomOrder}
+          resumeVideo={resumeVideo}
+          globalConfig={globalConfig}
+          followed={followed}
+          sources={imgSources}
+          removeFromWishlist={removeFromWishlist}
+          addToWishList={addToWishList}
+          setCurrentImageIndex={setCurrentImageIndex}
+          slideTabCentreNone={slideTabCentreNone}
+          handleShare={handleShare}
+          showShareIcon={showShareIcon}
+          renderTag={renderTag}
+          showArrows={mobileShowArrows}
+          showDots={mobileShowDots}
+        />
+      </div>
+
+      {enableLightBox &&
+        createPortal(
+          <Suspense fallback={<div />}>
+            <LightboxImage
+              images={images}
+              showCaption={false}
+              showLightBox={enableLightBox}
+              iconColor={iconColor}
+              toggleResumeVideo={() => setResumeVideo((prev) => !prev)}
+              globalConfig={globalConfig}
+              closeGallery={() => setEnableLightBox(false)}
+              currentIndex={selectedImageIndex}
+              imgSources={imgSources}
+            />
+          </Suspense>,
+          document.body
+        )}
+    </div>
+  );
+}
+
+export default PdpImageGallery;

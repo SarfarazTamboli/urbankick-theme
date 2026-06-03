@@ -1,0 +1,230 @@
+@import "../../../styles/main.less";
+
+.orderWrapper {
+  width: 100%;
+  margin-bottom: 16px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.orderCard {
+  background-color: @OverlayPopupHighlightColor;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  @media @mobile {
+    padding: 12px 16px;
+  }
+}
+
+.orderCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.orderInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.orderId {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 16px;
+  line-height: 1.4;
+  color: @OldColorPaletteTextColorPrimary;
+  margin: 0;
+
+  @media @mobile {
+    font-size: 14px;
+  }
+}
+
+.orderDate {
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 1.4;
+  color: @UserAlertTextLabel;
+  margin: 0;
+}
+
+.productsContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.productSection {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+
+  &:hover {
+    opacity: 0.8;
+  }
+
+  @media @mobile {
+    gap: 12px;
+  }
+}
+
+.productImage {
+  width: 100px;
+  height: 100px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: @White;
+
+  img {
+    width: 100%;
+    height: 100%;
+  }
+
+  @media @mobile {
+    width: 80px;
+    height: 80px;
+  }
+}
+
+.imageCover {
+  object-fit: cover;
+}
+
+.imageContain {
+  object-fit: contain;
+}
+
+.productDetails {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.brandName {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1.4;
+  color: @OldColorPaletteTextColorPrimary;
+  margin: 0;
+  white-space: pre-wrap;
+
+  @media @mobile {
+    font-size: 13px;
+  }
+}
+
+.shipmentId {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.4;
+  color: @OldColorPaletteTextColorPrimary;
+  margin: 0;
+  white-space: pre-wrap;
+  display: flex;
+  @media @mobile {
+    display: block;
+  }
+  .exchangeBadge {
+    @media @mobile {
+      margin-inline-start: 0;
+      margin-top: 4px;
+    }
+    margin-inline-start: 8px;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    gap: 2px;
+    background: var(--themeAccentL3);
+    padding: 2px 4px;
+    border-radius: 3px;
+    svg {
+      width: 16px;
+      height: 16px;
+    }
+    svg > path {
+      fill: var(--successText, #1c958f);
+    }
+  }
+  @media @mobile {
+    font-size: 13px;
+  }
+}
+
+.productMeta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.metaText {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 12px;
+  line-height: 1.4;
+  color: @UserAlertTextLabel;
+  white-space: nowrap;
+}
+
+.metaDivider {
+  color: @UserAlertTextLabel;
+  font-size: 12px;
+  margin: 0 4px;
+}
+
+.freeGiftBadge {
+  background-color: @SuccessBackground;
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+.freeGiftText {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 1.4;
+  color: @SuccessText;
+  text-transform: lowercase;
+}
+
+.statusBadge {
+  background-color: @SuccessBackground;
+  padding: 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-self: flex-start;
+  &.exchangeIconBox {
+    align-items: center;
+    gap: 2px;
+  }
+  svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+.statusText {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 12px;
+  line-height: 1.4;
+  color: @SuccessText;
+}

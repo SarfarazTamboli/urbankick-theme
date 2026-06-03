@@ -1,0 +1,535 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { BlockRenderer } from "fdk-core/components";
+import styles from "../styles/sections/collections-listing.less";
+import { COLLECTION } from "../queries/collectionsQuery";
+import { useGlobalStore, useFPI } from "fdk-core/utils";
+import placeholderImage from "../assets/images/placeholder/collections-listing.png";
+import CollectionCard from "../components/collection-card/collection-card";
+import useLocaleDirectionHook from "../helper/hooks/useLocaleDirection";
+import { isRunningOnClient, getEffectiveCarouselControls } from "../helper/utils";
+import { useWindowWidth } from "../helper/hooks";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselPrevious,
+  CarouselNext,
+  CarouselDots,
+} from "../components/carousel";
+
+export function Component({ props, blocks, globalConfig, id: sectionId }) {
+  const fpi = useFPI();
+
+  const {
+    heading,
+    description,
+    layout_mobile,
+    layout_desktop,
+    per_row,
+    per_row_mobile,
+    img_container_bg,
+    padding_top,
+    padding_bottom,
+  } = props;
+
+  const itemsPerRowDesktop = Number(per_row?.value ?? 3);
+  const itemsPerRowMobile = Number(per_row_mobile?.value ?? 1);
+  const windowWidth = useWindowWidth();
+  const isDesktop = windowWidth >= 769;
+  // Keep layout decisions SSR-safe (no matchMedia branching)
+  const itemsPerRow = itemsPerRowDesktop;
+  const customValue = useGlobalStore(fpi?.getters?.CUSTOM_VALUE) ?? {};
+
+  const collectionIds = useMemo(() => {
+    return (
+      blocks
+        ?.map((block, index) => ({
+          type: block?.type,
+          slug:
+            block?.type !== "collection-item"
+              ? `${block?.type}_${index}`
+              : block?.props?.collection?.value,
+          block,
+        }))
+        ?.filter(({ slug }) => slug) ?? []
+    );
+  }, [blocks]);
+
+  const customSectionId = collectionIds?.map(({ slug }) => slug).join("__");
+  const collections = customValue[`collectionData-${customSectionId}`] || [];
+
+  useEffect(() => {
+    if (isRunningOnClient()) {
+      const fetchCollections = async () => {
+        try {
+          const promisesArr = collectionIds?.map(
+            async ({ type, slug, block }) => {
+              const listingData = { type };
+
+              if (type !== "collection-item") {
+                listingData.data = block;
+              } else {
+                const response = await fpi.executeGQL(COLLECTION, {
+                  slug: slug.split(" ").join("-"),
+                });
+
+                listingData.data = response?.data || {};
+              }
+
+              return listingData;
+            }
+          );
+
+          const responses = await Promise.all(promisesArr);
+          fpi.custom.setValue(`collectionData-${customSectionId}`, responses);
+        } catch (err) {
+          // console.log(err);
+        }
+      };
+      if (!collections?.length && collectionIds?.length) {
+        fetchCollections();
+      }
+    }
+  }, [collectionIds]);
+
+  const isDemoBlock = () => {
+    if (
+      collectionsForScrollView?.length > 0 ||
+      collectionsForStackedView?.length > 0
+    ) {
+      return false;
+    }
+    const collections =
+      blocks?.reduce(
+        (acc, b) =>
+          b?.props?.collection?.value
+            ? [...acc, b?.props?.collection?.value]
+            : acc,
+        []
+      ) || [];
+    return collections?.length === 0;
+  };
+
+  const getImgSrcSet = () => {
+    if (globalConfig?.img_hd) {
+      return [];
+    }
+    return [
+      {
+        breakpoint: { min: 1728 },
+        width: Math.round(3564 / itemsPerRowDesktop),
+      },
+      {
+        breakpoint: { min: 1512 },
+        width: Math.round(3132 / itemsPerRowDesktop),
+      },
+      {
+        breakpoint: { min: 1296 },
+        width: Math.round(2700 / itemsPerRowDesktop),
+      },
+      {
+        breakpoint: { min: 1080 },
+        width: Math.round(2250 / itemsPerRowDesktop),
+      },
+      {
+        breakpoint: { min: 900 },
+        width: Math.round(1890 / itemsPerRowDesktop),
+      },
+      { breakpoint: { min: 720 }, width: Math.round(1530 / 3) },
+      { breakpoint: { min: 540 }, width: Math.round(1170 / 3) },
+      { breakpoint: { min: 360 }, width: Math.round(810) },
+      { breakpoint: { min: 180 }, width: Math.round(450) },
+    ];
+  };
+
+  const collectionsForStackedView = useMemo(
+    () => collections.slice(0, itemsPerRow * 2),
+    [collections, itemsPerRow]
+  );
+
+  const collectionsForScrollView = useMemo(() => {
+    return collections.slice(0, itemsPerRow * 4);
+  }, [collections, itemsPerRow]);
+
+  const isStackView =
+    layout_mobile?.value === "stacked" || layout_desktop?.value === "grid";
+  const isHorizontalView =
+    layout_mobile?.value === "horizontal" ||
+    layout_desktop?.value === "horizontal";
+
+  const stackViewClassName = `${
+    layout_mobile?.value === "horizontal" ? styles.hideOnTablet : ""
+  } ${layout_desktop?.value === "horizontal" ? styles.hideOnDesktop : ""}`;
+
+  const horizontalViewClassName = `${
+    collectionsForScrollView?.length === 1 ? styles.singleItem : ""
+  } ${itemsPerRowMobile === 1 ? styles.singleItemPerRowMobile : ""} ${
+    layout_mobile?.value === "stacked" ? styles.hideOnTablet : ""
+  } ${layout_desktop?.value === "grid" ? styles.hideOnDesktop : ""}`;
+  const { direction } = useLocaleDirectionHook();
+
+  const dynamicStyles = {
+    paddingTop: `${padding_top?.value ?? 16}px`,
+    paddingBottom: `${padding_bottom?.value ?? 16}px`,
+    "--bg-color": `${img_container_bg?.value || "#00000000"}`,
+  };
+
+  const len = collectionsForScrollView.length;
+  const itemsPerView = isDesktop ? itemsPerRowDesktop : itemsPerRowMobile;
+  const { showArrows, showDots } = getEffectiveCarouselControls(
+    globalConfig,
+    isDesktop,
+    len,
+    itemsPerView
+  );
+
+  const carouselProps = useMemo(() => {
+    const opts = {
+      align: len > 1 ? "center" : "start",
+      direction,
+      loop: len > 1,
+      draggable: true,
+      containScroll: "trimSnaps",
+      slidesToScroll: itemsPerRowMobile,
+      duration: 25,
+      breakpoints: {
+        "(min-width: 481px)": {
+          align: "start",
+          loop: len > itemsPerRowDesktop,
+          slidesToScroll: itemsPerRowDesktop,
+          duration: 40,
+        },
+      },
+    };
+    return { opts };
+  }, [direction, len, itemsPerRowDesktop, itemsPerRowMobile]);
+
+  return (
+    <section className={styles.collections__template} style={dynamicStyles}>
+      <div className={`fx-title-block ${styles["section-title-block"]}`}>
+        <h2 className={`fx-title ${styles["section-title"]} fontHeader`}>
+          {heading?.value}
+        </h2>
+        <p className={`fx-description ${styles["section-description"]}`}>
+          {description.value}
+        </p>
+      </div>
+      {isStackView && (
+        <div
+          className={`${styles.collectionGrid} ${stackViewClassName}`}
+          style={{ "--grid-columns": itemsPerRow }}
+        >
+          {collectionsForStackedView?.map(
+            ({ type, data: card, slug }, index) =>
+              type !== "collection-item" ? (
+                <BlockRenderer key={slug} block={card} />
+              ) : (
+                <CollectionItem
+                  key={`${card?.collection?.name}_${index}`}
+                  collection={card?.collection}
+                  props={props}
+                  srcset={getImgSrcSet()}
+                  defer={index >= itemsPerRow}
+                  globalConfig={globalConfig}
+                />
+              )
+          )}
+        </div>
+      )}
+      {isHorizontalView && !!collectionsForScrollView.length && (
+        <div
+          className={`remove-horizontal-scroll ${styles.collectionSlider} ${horizontalViewClassName}`}
+          style={{
+            "--items-per-row-desktop": itemsPerRowDesktop,
+            "--items-per-row-mobile": itemsPerRowMobile,
+          }}
+        >
+          <Carousel {...carouselProps}>
+            <CarouselContent className={styles.carouselContent}>
+              {collectionsForScrollView?.map(
+                ({ type, data: card, slug }, index) => (
+                  <CarouselItem
+                    key={index}
+                    className={styles.carouselItemWrapper}
+                  >
+                    {type !== "collection-item" ? (
+                      <BlockRenderer key={slug} block={card} />
+                    ) : (
+                      <CollectionItem
+                        className={styles.sliderItem}
+                        key={`${card?.collection?.name}_${index}`}
+                        collection={card?.collection}
+                        props={props}
+                        srcset={getImgSrcSet()}
+                        defer={index >= itemsPerRow}
+                        globalConfig={globalConfig}
+                      />
+                    )}
+                  </CarouselItem>
+                )
+              )}
+            </CarouselContent>
+            {showArrows && (
+              <>
+                <CarouselPrevious className={styles.carouselBtn} />
+                <CarouselNext className={styles.carouselBtn} />
+              </>
+            )}
+            {showDots && (
+              <CarouselDots productsPerRow={itemsPerRowMobile} />
+            )}
+          </Carousel>
+        </div>
+      )}
+      {isDemoBlock() && (
+        <div className={`${styles.collectionGrid} ${styles.defaultGrid}`}>
+          {["Featured Products", "New Arrivals", "Best Sellers"].map(
+            (item, index) => (
+              <CollectionItem
+                key={`default_${index}`}
+                collection={{ name: item }}
+                props={props}
+                srcset={getImgSrcSet()}
+                defer={false}
+                globalConfig={globalConfig}
+              />
+            )
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+const CollectionItem = ({
+  className = "",
+  props,
+  collection,
+  srcset,
+  defer = false,
+  globalConfig,
+}) => {
+  const { img_fill, img_container_bg, button_text, name_placement } = props;
+  return (
+    <div className={`fx-collection-card ${className}`}>
+      <CollectionCard
+        collectionName={collection?.name}
+        collectionImage={collection?.banners?.portrait?.url || placeholderImage}
+        collectionAction={collection?.action}
+        buttonText={button_text?.value}
+        isNameOverImage={name_placement?.value === "inside"}
+        imageProps={{
+          backgroundColor: img_container_bg?.value,
+          isImageFill: img_fill?.value,
+          aspectRatio: 0.8,
+          sources: srcset,
+          defer,
+        }}
+      />
+    </div>
+  );
+};
+
+export const settings = {
+  label: "t:resource.sections.collections_listing.collections_listing",
+  props: [
+    {
+      type: "text",
+      id: "heading",
+      default: "t:resource.default_values.collects_listing_heading",
+      label: "t:resource.common.heading",
+      info: "t:resource.common.section_heading_text",
+    },
+    {
+      type: "textarea",
+      id: "description",
+      default: "t:resource.default_values.collects_listing_description",
+      label: "t:resource.common.description",
+      info: "t:resource.common.section_description_text",
+    },
+    {
+      id: "layout_mobile",
+      type: "select",
+      options: [
+        {
+          value: "stacked",
+          text: "t:resource.common.stack",
+        },
+        {
+          value: "horizontal",
+          text: "t:resource.common.horizontal",
+        },
+      ],
+      default: "horizontal",
+      label: "t:resource.sections.collections_listing.layout_mobile",
+      info: "t:resource.common.alignment_of_content",
+    },
+    {
+      id: "layout_desktop",
+      type: "select",
+      options: [
+        {
+          value: "grid",
+          text: "t:resource.common.stack",
+        },
+        {
+          value: "horizontal",
+          text: "t:resource.common.horizontal",
+        },
+      ],
+      default: "horizontal",
+      label: "t:resource.sections.collections_listing.layout_desktop",
+      info: "t:resource.common.alignment_of_content",
+    },
+    {
+      type: "select",
+      id: "name_placement",
+      label: "t:resource.sections.collections_listing.collection_title",
+      default: "inside",
+      info: "t:resource.sections.collections_listing.collection_title_info",
+      options: [
+        {
+          value: "inside",
+          text: "t:resource.sections.categories_listing.inside_the_image",
+        },
+        {
+          value: "outside",
+          text: "t:resource.sections.categories_listing.outside_the_image",
+        },
+      ],
+    },
+    {
+      type: "text",
+      id: "button_text",
+      default: "t:resource.default_values.shop_now",
+      label: "t:resource.common.button_text",
+    },
+    {
+      type: "range",
+      id: "per_row",
+      label:
+        "t:resource.sections.collections_listing.collections_per_row_desktop",
+      min: "3",
+      max: "4",
+      step: "1",
+      info: "t:resource.common.not_applicable_for_mobile",
+      default: "3",
+    },
+    {
+      type: "range",
+      id: "per_row_mobile",
+      label:
+        "t:resource.sections.collections_listing.collections_per_row_mobile",
+      min: "1",
+      max: "3",
+      step: "1",
+      default: "1",
+      info: "t:resource.common.not_applicable_for_desktop",
+    },
+    {
+      type: "color",
+      id: "img_container_bg",
+      category: "t:resource.common.image_container",
+      default: "#00000000",
+      label: "t:resource.common.container_background_color",
+      info: "t:resource.common.image_container_bg_color",
+    },
+    {
+      type: "checkbox",
+      id: "img_fill",
+      category: "t:resource.common.image_container",
+      default: true,
+      label: "t:resource.common.fit_image_to_container",
+      info: "t:resource.common.clip_image_to_fit_container",
+    },
+    {
+      type: "range",
+      id: "padding_top",
+      min: 0,
+      max: 100,
+      step: 1,
+      unit: "px",
+      label: "t:resource.sections.categories.top_padding",
+      default: 16,
+      info: "t:resource.sections.categories.top_padding_for_section",
+    },
+    {
+      type: "range",
+      id: "padding_bottom",
+      min: 0,
+      max: 100,
+      step: 1,
+      unit: "px",
+      label: "t:resource.sections.categories.bottom_padding",
+      default: 16,
+      info: "t:resource.sections.categories.bottom_padding_for_section",
+    },
+  ],
+  blocks: [
+    {
+      type: "collection-item",
+      name: "t:resource.sections.collections_listing.collection_item",
+      props: [
+        {
+          type: "collection",
+          id: "collection",
+          label: "t:resource.sections.collections_listing.select_collection",
+        },
+      ],
+    },
+  ],
+  preset: {
+    blocks: [
+      {
+        name: "t:resource.sections.collections_listing.collection_1",
+      },
+      {
+        name: "t:resource.sections.collections_listing.collection_2",
+      },
+      {
+        name: "t:resource.sections.collections_listing.collection_3",
+      },
+    ],
+  },
+};
+
+Component.serverFetch = async ({ fpi, blocks }) => {
+  try {
+    const collectionIds = blocks
+      ?.map((block, index) => ({
+        type: block?.type,
+        slug:
+          block?.type !== "collection-item"
+            ? `${block?.type}_${index}`
+            : block?.props?.collection?.value,
+        block,
+      }))
+      ?.filter(({ slug }) => slug);
+
+    const customSectionId = collectionIds.map(({ slug }) => slug).join("__");
+
+    const responses = await Promise.all(
+      collectionIds.map(async ({ type, slug, block }) => {
+        const listingData = { type };
+        if (type !== "collection-item") {
+          listingData.data = block;
+        } else {
+          const response = await fpi.executeGQL(COLLECTION, {
+            slug: slug.split(" ").join("-"),
+          });
+          listingData.data = response?.data || {};
+        }
+        return listingData;
+      })
+    );
+
+    // Save for hydration
+
+    return fpi.custom.setValue(`collectionData-${customSectionId}`, responses);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("SSR Fetch Error:", err);
+  }
+};
+
+export default Component;

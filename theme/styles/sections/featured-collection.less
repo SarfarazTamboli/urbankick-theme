@@ -1,0 +1,513 @@
+@import "../main.less";
+
+.addToCartContainer {
+  @media @desktop {
+    max-width: unset !important;
+    .addToCartBody {
+      overflow-y: hidden;
+    }
+  }
+}
+
+.sectionWrapper {
+  min-height: 400px;
+  @media @tablet {
+    min-height: 370px;
+  }
+  @media @mobile {
+    min-height: 420px;
+  }
+
+  .visibleOnMobile {
+    @media @desktop {
+      display: none;
+    }
+  }
+}
+
+.titleBlock {
+  padding-inline: @SectionInlinePaddingDesktop;
+  padding-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  @media @tablet {
+    padding-inline: @SectionInlinePaddingTablet;
+    padding-bottom: 8px;
+  }
+  @media @mobile {
+    padding-inline: @SectionInlinePaddingMobile;
+  }
+  &.bannerTitleBlock {
+    display: flex;
+    flex-direction: column;
+    padding-inline-start: 0;
+    p {
+      margin-top: 0;
+      margin-inline-end: 0;
+      margin-bottom: 22px;
+      margin-inline-start: 0;
+    }
+  }
+  .sectionHeading {
+    margin-bottom: 16px;
+    @media @tablet {
+      margin-bottom: 8px;
+    }
+  }
+  .description {
+    max-width: 590px;
+    margin: 0 auto;
+    margin-bottom: 16px;
+    @media @tablet {
+      margin-bottom: 16px;
+    }
+  }
+}
+
+.imageGrid {
+  padding-inline: @SectionInlinePaddingDesktop;
+  display: grid;
+  gap: 32px 24px;
+  grid-template-columns: repeat(var(--per-row), 1fr);
+
+  &.singleItem {
+    display: flex;
+    justify-content: center;
+    & > * {
+      flex: 0 1 calc(100% / var(--per-row));
+      @media @mobile {
+        flex: 1;
+      }
+    }
+  }
+  @media @tablet {
+    padding-inline: @SectionInlinePaddingTablet;
+    gap: 24px 16px;
+    grid-template-columns: repeat(var(--brand-item), 1fr);
+  }
+  @media @mobile {
+    padding-inline: @SectionInlinePaddingMobile;
+    gap: 12px;
+    grid-template-columns: repeat(var(--per-row-mobile), 1fr);
+  }
+}
+
+.gridItem {
+  min-width: 0;
+  :global {
+    h5,
+    h4,
+    h3,
+    .product-title,
+    .title {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+      display: block;
+    }
+  }
+}
+
+.imageGallery {
+  border-radius: @ImageRadius;
+  -webkit-mask-image: -webkit-radial-gradient(white, black); //safari fix
+  mask-image: radial-gradient(white, black);
+}
+
+.pos-relative {
+  position: relative;
+}
+
+.gap-above-button {
+  margin-top: 1rem;
+  text-align: center;
+  @media @tablet-strict {
+    margin-top: 16px;
+  }
+  @media @desktop {
+    margin-top: 32px;
+  }
+  &.visibleOnDesktop {
+    @media @tablet {
+      display: none;
+    }
+    @media @desktop {
+      margin-top: 0;
+      margin-inline-end: 0;
+      margin-bottom: 61px;
+      margin-inline-start: 0;
+      // button {
+      //   border: none !important;
+      //   text-decoration: underline;
+      //   padding: 0;
+      //   background-color: @PageBackground;
+      //   &:hover {
+      //     background-color: @PageBackground;
+      //     color: @ButtonPrimary;
+      //   }
+      // }
+    }
+  }
+}
+
+.gap-above-button-horizontal {
+  margin-top: 1rem;
+  text-align: center;
+  @media @tablet-strict {
+    margin-top: 16px;
+  }
+  @media @desktop {
+    margin-top: 64px;
+
+    &.lessGap {
+      margin-top: 24px;
+    }
+  }
+}
+
+.section-button {
+  padding: 12px 24px;
+  border-radius: @ButtonRadius;
+  cursor: pointer;
+}
+
+.productSlider {
+  --gap: 24px;
+  padding-inline: @SectionInlinePaddingDesktop;
+  @media @tablet {
+    --gap: 16px;
+    padding-inline: @SectionInlinePaddingTablet;
+  }
+  @media @mobile {
+    --gap: 12px;
+    padding: 0;
+    &.productSliderNoBanner {
+      padding-inline-start: 10px;
+    }
+  }
+
+
+  :global {
+    .slick-list {
+      margin: 0 calc(var(--gap) / 2 * -1);
+    }
+    .slick-track {
+      display: flex;
+    }
+    .slick-slide {
+      height: auto;
+      & > * {
+        height: 100%;
+      }
+    }
+  }
+
+  .slidePeek {
+    flex: 0 0 calc(100% / 2.5);
+  }
+
+  .slidePeekMobile {
+    flex: 0 0 90%;
+  }
+
+  .sliderItem {
+    padding: 0 calc(var(--gap) / 2);
+    height: 100%;
+  }
+
+  &.lessItem {
+    @media @mobile {
+      padding-inline: @SectionInlinePaddingMobile;
+    }
+  }
+
+  &.bannerSlider {
+    position: relative;
+    @media @desktop {
+      padding-inline: 0;
+    }
+  }
+}
+
+/* ✅ NEW: CarouselItem basis controlled by CSS vars (SSR-safe) */
+.fcCarouselItemHorizontal {
+  flex: 0 0 calc(100% / var(--count-desktop, 4)) !important;
+  @media @tablet-strict {
+    flex: 0 0 calc(100% / 3) !important;
+  }
+  @media @mobile {
+    flex: 0 0 calc((100% - 38px) / var(--count-mobile, 1)) !important;
+  }
+}
+.bannerImageSliderWrap {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  @media @tablet {
+    display: block;
+    .titleBlock {
+      display: none;
+    }
+  }
+
+  .fcCarouselItem {
+    flex: 0 0 40%;
+    @media @tablet {
+      max-height: 300px;
+      max-width: 250px;
+      flex: 0 0 50%;
+    }
+    @media @mobile {
+      max-height: 295px;
+      flex: 0 0 100%;
+    }
+  }
+
+  .bannerImage {
+    flex: 0 0 47.5%;
+    border-radius: 0px 24px 24px 0px;
+    overflow: hidden;
+  }
+
+  .slideWrapBanner {
+    flex: 1;
+    min-width: 0;
+    @media @tablet {
+      margin-top: 24px;
+    }
+
+    .customNextBtn,
+    .customPrevBtn {
+      width: 48px;
+      height: 48px;
+      position: absolute;
+      top: 45%;
+      inset-inline-end: 4rem;
+      transform: translateY(-50%);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: @PageBackground;
+      border: 1px solid @TextHeading;
+      border-radius: 0;
+
+      @media @tablet {
+        display: none;
+      }
+
+      svg {
+        fill: @TextHeading;
+      }
+    }
+    .customNextBtn {
+      right: min(5vw, 72px);
+    }
+
+    .customPrevBtn {
+      left: 25px;
+    }
+  }
+}
+
+.bannerVerticalWrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 32px;
+  padding-inline: @SectionInlinePaddingDesktop;
+  @media @tablet {
+    padding-inline: @SectionInlinePaddingTablet;
+    gap: 24px;
+  }
+  @media @mobile {
+    flex-direction: column;
+    padding-inline: @SectionInlinePaddingMobile;
+    gap: 24px;
+  }
+
+  .bannerImageVertical {
+    flex: 0 0 50%;
+    border-radius: 24px;
+    overflow: hidden;
+    @media @tablet {
+      min-height: 500px;
+    }
+    @media @mobile {
+      flex: 1;
+      width: 100%;
+      min-height: 0;
+    }
+  }
+
+  .bannerVerticalContent {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    @media @tablet {
+      gap: 20px;
+    }
+    @media @mobile {
+      gap: 16px;
+    }
+
+    .bannerVerticalTitleBlock {
+      padding-inline: 0;
+      padding-bottom: 0;
+      @media @mobile {
+        padding-inline: 0;
+      }
+
+      p {
+        margin-top: 0;
+        margin-bottom: 16px;
+        @media @mobile {
+          margin-bottom: 12px;
+        }
+      }
+    }
+
+    .bannerVerticalGrid {
+      width: 100%;
+      min-width: 0;
+      padding-inline: 0;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px 16px;
+      align-items: start;
+      @media @tablet {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px 12px;
+      }
+      @media @mobile {
+        grid-template-columns: repeat(var(--per-row-mobile), minmax(0, 1fr));
+        gap: 12px;
+        align-items: start;
+      }
+
+      & > * {
+        height: auto;
+        min-height: 0;
+      }
+    }
+  }
+}
+
+.placeholderContainer {
+  overflow: hidden;
+  margin-inline: @SectionInlinePaddingDesktop;
+  @media @tablet {
+    margin-inline: @SectionInlinePaddingTablet;
+  }
+  @media @mobile {
+    margin-inline: 0;
+    padding-inline: 25px;
+  }
+  .placeholderScroll {
+    --gap: 24px;
+    display: flex;
+    margin: 0 calc(var(--gap) / 2 * -1);
+    @media @tablet {
+      --gap: 16px;
+    }
+    @media @mobile {
+      --gap: 12px;
+    }
+
+    .placeholderItem {
+      --col-count: var(--per-row);
+      padding: 0 calc(var(--gap) / 2);
+      flex: 0 0 calc(100% / var(--col-count));
+      @media @tablet {
+        --col-count: 3;
+      }
+      @media @mobile {
+        --col-count: var(--per-row-mobile);
+      }
+    }
+  }
+}
+
+@media @desktop {
+  .desktopVisible {
+    display: block;
+  }
+  .desktopVisibleFlex {
+    display: flex;
+  }
+  .desktopHidden {
+    display: none;
+  }
+  .desktopHiddenFlex {
+    display: none;
+  }
+  .hideOnDesktop {
+    display: none;
+  }
+  .hideOnAllScreens {
+    display: none;
+  }
+}
+@media @tablet {
+  .mobileVisible {
+    display: block !important;
+  }
+  .mobileVisible.bannerVerticalWrap,
+  .mobileVisible.bannerImageSliderWrap {
+    display: flex !important;
+  }
+  .mobileHidden {
+    display: none !important;
+  }
+  .hideOnDesktop {
+    display: block;
+  }
+  .desktopVisibleFlex {
+    display: flex;
+  }
+  .desktopHiddenFlex.mobileVisible {
+    display: flex !important;
+  }
+  .desktopHiddenFlex:not(.mobileVisible) {
+    display: none;
+  }
+  .hideOnAllScreens {
+    display: none;
+  }
+}
+@media @mobile {
+  .hideOnMobile {
+    display: none;
+  }
+  .hideOnDesktop {
+    display: block;
+  }
+  .desktopVisibleFlex {
+    display: flex;
+  }
+  .mobileVisible {
+    display: block !important;
+  }
+  .mobileVisible.bannerVerticalWrap,
+  .mobileVisible.bannerImageSliderWrap {
+    display: flex !important;
+  }
+  .mobileHidden {
+    display: none !important;
+  }
+  .desktopHiddenFlex.mobileVisible {
+    display: flex !important;
+  }
+  .desktopHiddenFlex:not(.mobileVisible) {
+    display: none;
+  }
+  .hideOnAllScreens {
+    display: none;
+  }
+}
+@media @mobile-up {
+  .hideOnTablet {
+    display: none;
+  }
+}

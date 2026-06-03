@@ -1,0 +1,541 @@
+import React, { useMemo, useEffect, useState, useRef } from "react";
+import Values from "values.js";
+import { useLocation, useSearchParams } from "react-router-dom";
+import { useFPI, useGlobalStore } from "fdk-core/utils";
+import MobileNavigation from "../components/mobile-navigation/mobile-navigation";
+import { Helmet } from "react-helmet-async";
+import {
+  getProductImgAspectRatio,
+  isRunningOnClient,
+  sanitizeHTMLTag,
+} from "../helper/utils";
+import { useThemeConfig } from "../helper/hooks";
+import useInternational from "../components/header/useInternational";
+import usePrefetchCollectionOnHover from "../helper/hooks/usePrefetchCollectionOnHover";
+import usePrefetchProductsOnHover from "../helper/hooks/usePrefetchProductsOnHover";
+import { fetchCartDetails } from "../page-layouts/cart/useCart";
+import { initializeCopilot } from "../../copilot";
+
+export function ThemeProvider({ children }) {
+  const fpi = useFPI();
+  const location = useLocation();
+  const [isMobile, setIsMobile] = useState(false);
+  const locationDetails = useGlobalStore(fpi.getters.LOCATION_DETAILS);
+  const seoData = useGlobalStore(fpi.getters.CONTENT)?.seo?.seo?.details;
+  const title = sanitizeHTMLTag(seoData?.title);
+  const description = sanitizeHTMLTag(seoData?.description);
+  const CONFIGURATION = useGlobalStore(fpi.getters.CONFIGURATION);
+  const sections = useGlobalStore(fpi.getters.PAGE)?.sections || [];
+  const { globalConfig, pallete } = useThemeConfig({ fpi });
+  const siteName = sanitizeHTMLTag(
+    globalConfig?.site_name ||
+      globalConfig?.brand_name ||
+      CONFIGURATION?.application?.name ||
+      CONFIGURATION?.app?.name
+  );
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const mq = window.matchMedia("(max-width: 767px)");
+      setIsMobile(mq.matches);
+      const handler = (e) => setIsMobile(e.matches);
+      if (mq.addEventListener) {
+        mq.addEventListener("change", handler);
+      } else if (mq.addListener) {
+        mq.addListener(handler);
+      }
+      return () => {
+        if (mq.removeEventListener) {
+          mq.removeEventListener("change", handler);
+        } else if (mq.removeListener) {
+          mq.removeListener(handler);
+        }
+      };
+    }
+  }, []);
+
+  useEffect(() => {
+    // Strict SSR check - only run in browser
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    // Strict check - document must exist (should exist if window exists, but being safe)
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    // Get Storefront Copilot Actions configuration
+    const storefrontCopilotActions =
+      globalConfig?.storefront_copilot_actions ?? false;
+
+    // Auto-initialize copilot if window.copilot is available
+    // Only register storefront actions if storefront_copilot_actions is enabled
+    const initCopilot = () => {
+      initializeCopilot({
+        storefrontCopilotActions,
+      }).catch(() => {
+        // Silently handle errors
+        // Errors are already handled within initializeCopilot
+      });
+    };
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", initCopilot);
+      return () =>
+        document.removeEventListener("DOMContentLoaded", initCopilot);
+    } else {
+      initCopilot();
+    }
+  }, [globalConfig?.storefront_copilot_actions]);
+
+  let domainUrl =
+    CONFIGURATION?.application?.domains?.find((d) => d.is_primary)?.name || "";
+  if (domainUrl && !/^https?:\/\//i.test(domainUrl)) {
+    domainUrl = `https://${domainUrl}`;
+  }
+  const baseUrl =
+    domainUrl || (isRunningOnClient() ? window?.location?.origin : "");
+  const image = sanitizeHTMLTag(
+    seoData?.image ||
+      seoData?.image_url ||
+      CONFIGURATION?.application?.logo?.secure_url ||
+      ""
+  );
+  const canonicalPath = sanitizeHTMLTag(seoData?.canonical_url);
+  let canonicalUrl = "";
+  if (canonicalPath) {
+    if (/^https?:\/\//i.test(canonicalPath)) {
+      canonicalUrl = canonicalPath;
+    } else {
+      canonicalUrl = `${baseUrl}${canonicalPath.startsWith("/") ? canonicalPath : `/${canonicalPath}`}`;
+    }
+  } else if (baseUrl && location?.pathname) {
+    canonicalUrl = `${baseUrl}${location.pathname}`;
+  }
+  const resolvedImage =
+    image && baseUrl && !/^https?:\/\//i.test(image)
+      ? `${baseUrl}${image.startsWith("/") ? image : `/${image}`}`
+      : image;
+
+  const { defaultCurrency } = useGlobalStore(fpi.getters.CUSTOM_VALUE);
+  const sellerDetailsRaw = useGlobalStore(fpi.getters.SELLER_DETAILS);
+  const sellerDetails = useMemo(() => {
+    try {
+      return JSON.parse(sellerDetailsRaw || "{}");
+    } catch {
+      return {};
+    }
+  }, [sellerDetailsRaw]);
+  const {
+    i18nDetails,
+    countryDetails,
+    fetchCountrieDetails,
+    countryCurrencies,
+  } = useInternational({ fpi });
+
+  usePrefetchCollectionOnHover({ fpi, globalConfig });
+  usePrefetchProductsOnHover({ fpi, globalConfig });
+
+  const [searchParams] = useSearchParams();
+  const buyNow = JSON.parse(searchParams?.get("buy_now") || "false");
+
+  const TRANSPARENT_SECTION_NAMES_PROVIDER = useMemo(
+    () =>
+      new Set([
+        "application-banner",
+        "image-slideshow",
+        "hero-image",
+        "image-gallery",
+        "hero-video",
+      ]),
+    []
+  );
+
+  const isHomePage = location.pathname === "/";
+
+  const isValidSection = useMemo(() => {
+    if (!isHomePage) return false;
+    if (!sections || sections.length === 0) return false;
+    return sections.some((s) =>
+      TRANSPARENT_SECTION_NAMES_PROVIDER.has(s?.name)
+    );
+  }, [isHomePage, sections, TRANSPARENT_SECTION_NAMES_PROVIDER]);
+
+  const headerPosition = useMemo(() => {
+    if (
+      globalConfig?.transparent_header &&
+      globalConfig?.sticky_header &&
+      isValidSection
+    ) {
+      return "fixed";
+    } else if (globalConfig?.sticky_header) {
+      return "sticky";
+    } else {
+      return "unset";
+    }
+  }, [globalConfig, isValidSection]);
+
+  const fontStyles = useMemo(() => {
+    let styles = "";
+    const headerFont = globalConfig.font_header;
+    const bodyFont = globalConfig.font_body;
+    const headerFontName = headerFont?.family;
+    const headerFontVariants = headerFont?.variants;
+
+    const bodyFontName = bodyFont?.family;
+    const bodyFontVariants = bodyFont?.variants;
+
+    if (headerFontName) {
+      Object.keys(headerFontVariants).forEach((variant) => {
+        const fontStyles = `
+          @font-face {
+            font-family: ${headerFontName};
+            src: local(${headerFontName}),
+              url(${headerFontVariants[variant].file});
+            font-weight: ${headerFontVariants[variant].name};
+            font-display: swap;
+          }
+        `;
+
+        styles = styles.concat(fontStyles);
+      });
+
+      const customFontClasses = `
+        .fontHeader {
+          font-family: ${headerFontName} !important;
+        }
+      `;
+
+      styles = styles.concat(customFontClasses);
+    }
+
+    if (bodyFontName) {
+      Object.keys(bodyFontVariants).forEach((variant) => {
+        const fontStyles = `
+          @font-face {
+            font-family: ${bodyFontName};
+            src: local(${bodyFontName}),
+              url(${bodyFontVariants[variant].file});
+            font-weight: ${bodyFontVariants[variant].name};
+            font-display: swap;
+          }
+        `;
+
+        styles = styles.concat(fontStyles);
+      });
+
+      const customFontClasses = `
+        .fontBody {
+          font-family: ${bodyFontName} !important;
+        }
+      `;
+
+      styles = styles.concat(customFontClasses);
+    }
+
+    const buttonPrimaryShade = new Values(pallete.button.button_primary);
+    const buttonLinkShade = new Values(pallete.button.button_link);
+    const accentDarkShades = new Values(pallete.theme.theme_accent).shades(20);
+    const accentLightShades = new Values(pallete.theme.theme_accent).tints(20);
+    styles = styles.concat(
+      `:root, ::before, ::after {
+        --font-body: ${bodyFontName};
+        --font-header: ${headerFontName};
+        --section-bottom-padding: ${globalConfig?.section_margin_bottom}px;
+        --imageRadius: ${globalConfig?.image_border_radius}px;
+        --badgeRadius: ${globalConfig?.badge_border_radius ?? 24}px;
+        --buttonRadius: ${globalConfig?.button_border_radius}px;
+        --productImgAspectRatio: ${getProductImgAspectRatio(globalConfig)};
+        --buttonPrimaryL1: #${buttonPrimaryShade.tint(20).hex};
+        --buttonPrimaryL3: #${buttonPrimaryShade.tint(60).hex};
+        --buttonLinkL1: #${buttonLinkShade.tint(20).hex};
+        --buttonLinkL2: #${buttonLinkShade.tint(40).hex};
+        --page-max-width: ${globalConfig?.enable_page_max_width ? "1440px" : "unset"};
+        --headerPosition: ${headerPosition};
+        ${accentDarkShades?.reduce((acc, color, index) => acc.concat(`--themeAccentD${index + 1}: #${color.hex};`), "")}
+        ${accentLightShades?.reduce((acc, color, index) => acc.concat(`--themeAccentL${index + 1}: #${color.hex};`), "")}
+      }`
+    );
+    return styles.replace(/\s+/g, "");
+  }, [globalConfig, headerPosition]);
+
+  const fontLinks = useMemo(() => {
+    const links = [];
+    const addedDomains = new Set(); // Track added domains
+    const fonts = [
+      {
+        font: globalConfig.font_header,
+        keyPrefix: "header",
+        variant: "semi_bold",
+      },
+      {
+        font: globalConfig.font_body,
+        keyPrefix: "body",
+        variant: "regular",
+      },
+    ];
+
+    const addFontLinks = ({ font, keyPrefix, variant }) => {
+      if (font?.variants) {
+        const fontUrl = font.variants[variant].file;
+        let fontDomain;
+        try {
+          fontDomain = fontUrl ? new URL(fontUrl).origin : "";
+        } catch (error) {
+          fontDomain = ""; // Fallback to an empty string or handle as needed
+        }
+        if (!addedDomains.has(fontDomain)) {
+          links.push(
+            <link
+              key={`preconnect-${keyPrefix}-${links.length}`}
+              rel="preconnect"
+              href={fontDomain}
+            />
+          );
+          addedDomains.add(fontDomain); // Mark domain as added
+        }
+
+        links.push(
+          <link
+            key={`${keyPrefix}-${links.length}`}
+            rel="preload"
+            href={fontUrl}
+            as="font"
+            crossOrigin="anonymous"
+          />
+        );
+      }
+    };
+
+    fonts.forEach(addFontLinks); // Add links for both header and body fonts
+    return links;
+  }, [globalConfig]);
+
+  useEffect(() => {
+    if (globalConfig?.show_quantity_control) {
+      fetchCartDetails(fpi, { buyNow });
+    }
+  }, [globalConfig?.show_quantity_control]);
+
+  // to scroll top whenever path changes
+  const prevPathRef = useRef("");
+  useEffect(() => {
+    const currentPath = location?.pathname || "";
+    const prevPath = prevPathRef.current;
+    const cameFromPDP = prevPath.startsWith("/product/");
+    const goingToListingPage =
+      currentPath.startsWith("/products") ||
+      currentPath.startsWith("/collection/") ||
+      currentPath.startsWith("/brands/") ||
+      currentPath.startsWith("/categories/") ||
+      currentPath.startsWith("/collections/");
+
+    // Skip scroll reset only when navigating from PDP to a listing page
+    // (to preserve scroll position). Reset scroll for all other navigations.
+    if (!(cameFromPDP && goingToListingPage)) {
+      window.scrollTo(0, 0);
+    }
+
+    prevPathRef.current = currentPath;
+    return () =>
+      setTimeout(() => {
+        // Check if current page is PLP or PDP related
+        const isPLPOrPDP =
+          currentPath.startsWith("/product") ||
+          currentPath === "/products" ||
+          currentPath.startsWith("/products") ||
+          currentPath.startsWith("/collection/") ||
+          currentPath.startsWith("/brands/") ||
+          currentPath.startsWith("/categories/") ||
+          currentPath.startsWith("/collections/");
+
+        // If navigating away from PLP/PDP, clean up scroll states
+        if (!isPLPOrPDP) {
+          Object.keys(sessionStorage).forEach((key) => {
+            if (key.startsWith("plp_scroll_")) {
+              sessionStorage.removeItem(key);
+            }
+          });
+        }
+      }, 0);
+  }, [location?.pathname]);
+
+  useEffect(() => {
+    if (
+      !locationDetails?.country_iso_code ||
+      !i18nDetails?.currency?.code ||
+      !i18nDetails?.countryCode
+    ) {
+      // Try to get country from countryCurrencies (price factory enabled) - HIGHEST PRIORITY
+      const hasCountryCurrencies =
+        countryCurrencies && countryCurrencies.length > 0;
+      const defaultCountry =
+        hasCountryCurrencies &&
+        (countryCurrencies.find((country) => country.is_default) ||
+          countryCurrencies[0]);
+      const defaultCurrency =
+        defaultCountry?.currencies?.find((currency) => currency.is_default) ||
+        defaultCountry?.currencies?.[0];
+
+      // Fallback to sellerDetails.country_code (price factory disabled) - SECOND PRIORITY
+      const fallbackCountryCode = sellerDetails?.country_code;
+      const fallbackCurrency = sellerDetails?.currency?.code;
+
+      // Priority: countryCurrencies (price factory enabled) > sellerDetails (price factory disabled)
+      if (defaultCountry && defaultCurrency?.code) {
+        // Price factory enabled: use countryCurrencies (highest priority)
+        fpi.setI18nDetails({
+          countryCode: defaultCountry.iso2,
+          currency: { code: defaultCurrency.code },
+        });
+      } else if (fallbackCountryCode) {
+        // Price factory disabled: use sellerDetails.country_code (fallback)
+        fpi.setI18nDetails({
+          countryCode: fallbackCountryCode,
+          currency: {
+            code:
+              fallbackCurrency ||
+              i18nDetails?.currency?.code ||
+              defaultCurrency?.code ||
+              defaultCurrency ||
+              "INR",
+          },
+        });
+      }
+    }
+  }, [
+    countryCurrencies,
+    sellerDetails,
+    defaultCurrency,
+    i18nDetails?.currency?.code,
+  ]);
+
+  useEffect(() => {
+    if (
+      i18nDetails?.countryCode &&
+      i18nDetails?.countryCode !== countryDetails?.iso2
+    ) {
+      fetchCountrieDetails({ countryIsoCode: i18nDetails?.countryCode });
+    }
+  }, [i18nDetails?.countryCode]);
+
+  const isCartOrCheckout =
+    location.pathname.startsWith("/cart/checkout") ||
+    location.pathname.startsWith("/payment/");
+  const showMobileFooter =
+    isMobile && (globalConfig?.show_mobile_icons ?? false) && !isCartOrCheckout;
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (showMobileFooter) {
+      document.body.setAttribute("data-mobile-footer", "true");
+    } else {
+      document.body.removeAttribute("data-mobile-footer");
+    }
+    return () => document.body.removeAttribute("data-mobile-footer");
+  }, [showMobileFooter]);
+
+  const content = (
+    <div
+      data-mobile-footer={showMobileFooter ? "true" : undefined}
+      style={
+        showMobileFooter
+          ? {
+              paddingBottom: "56px",
+              "--mobile-nav-height": "56px",
+            }
+          : undefined
+      }
+    >
+      <Helmet>
+        {fontLinks}
+        <style type="text/css">{fontStyles}</style>
+        <title>{title}</title>
+        {description && <meta name="description" content={description} />}
+        {siteName && <meta property="og:site_name" content={siteName} />}
+        {title && <meta property="og:title" content={title} />}
+        <meta property="og:type" content="website" />
+        {canonicalUrl && <meta property="og:url" content={canonicalUrl} />}
+        {description && (
+          <meta property="og:description" content={description} />
+        )}
+        {resolvedImage && (
+          <>
+            <meta name="image" content={resolvedImage} />
+            <meta property="og:image" content={resolvedImage} />
+            <meta property="og:image:secure_url" content={resolvedImage} />
+            <meta property="og:image:width" content="1200" />
+            <meta property="og:image:height" content="628" />
+          </>
+        )}
+        <meta name="twitter:card" content="summary_large_image" />
+        {title && <meta name="twitter:title" content={title} />}
+        {description && (
+          <meta name="twitter:description" content={description} />
+        )}
+        {resolvedImage && <meta name="twitter:image" content={resolvedImage} />}
+        {canonicalUrl && <link rel="canonical" href={canonicalUrl} />}
+      </Helmet>
+      {children}
+      <MobileNavigation fpi={fpi} />
+    </div>
+  );
+
+  return content;
+}
+
+export const getHelmet = ({
+  seo = {},
+  title: overrideTitle,
+  description: overrideDescription,
+  image: overrideImage,
+  canonicalUrl: overrideCanonicalUrl,
+  url: overrideUrl,
+  siteName: overrideSiteName,
+  robots: overrideRobots,
+  ogType = "product",
+}) => {
+  const title = sanitizeHTMLTag(overrideTitle || seo?.title);
+
+  const description = sanitizeHTMLTag(overrideDescription || seo?.description);
+  const image = sanitizeHTMLTag(
+    overrideImage || (seo?.image ? seo?.image : seo?.image_url)
+  );
+  const url = sanitizeHTMLTag(overrideUrl || seo?.url || seo?.canonical_url);
+  const canonicalPath = sanitizeHTMLTag(
+    overrideCanonicalUrl || seo?.canonical_url
+  );
+  const siteName = sanitizeHTMLTag(
+    overrideSiteName || seo?.site_name || seo?.brand || title
+  );
+  const robots = sanitizeHTMLTag(overrideRobots || seo?.robots);
+  const canonicalUrl = canonicalPath || url;
+  return (
+    <Helmet>
+      <title>{title}</title>
+      {description && <meta name="description" content={description} />}
+      {robots && <meta name="robots" content={robots} />}
+      {siteName && <meta property="og:site_name" content={siteName} />}
+      {/* Open Graph for product */}
+      <meta property="og:type" content={ogType} />
+      {title && <meta property="og:title" content={title} />}
+      {description && <meta property="og:description" content={description} />}
+      <meta property="og:url" content={url} />
+
+      <meta property="og:image" content={image} />
+      <meta property="og:image:secure_url" content={image} />
+      <meta property="og:image:width" content="1200" />
+      <meta property="og:image:height" content="628" />
+      <meta name="image" content={image} />
+
+      {/* Twitter */}
+      <meta name="twitter:card" content="summary_large_image" />
+      {title && <meta name="twitter:title" content={title} />}
+      {description && <meta name="twitter:description" content={description} />}
+      {image && <meta name="twitter:image" content={image} />}
+
+      {canonicalUrl && <link rel="canonical" href={canonicalUrl} />}
+    </Helmet>
+  );
+};

@@ -1,0 +1,237 @@
+import React, { useState, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useGlobalStore, useGlobalTranslation } from "fdk-core/utils";
+import couponSuccessGif from "../../assets/images/coupon-success.gif";
+import {
+  APPLY_COUPON,
+  REMOVE_COUPON,
+  VALIDATE_COUPON,
+} from "../../queries/cartQuery";
+import { fetchCartDetails } from "./useCart";
+import { set } from "react-hook-form";
+import { useSnackbar } from "../../helper/hooks";
+
+const useCartCoupon = ({
+  fpi,
+  cartData,
+  showPaymentOptions = () => {},
+  setShowPayment = () => {},
+  setShowShipment = () => {},
+  currentStepIdx = null,
+  setIsLoading = () => {},
+  setCheckoutAmount = () => {},
+}) => {
+  const { t } = useGlobalTranslation("translation");
+  const coupons = useGlobalStore(fpi.getters.COUPONS);
+  const {
+    validateCouponPayload,
+    creditValidateCouponPayload,
+    inValidCouponData,
+    isCouponValid = true,
+    creditNoteApplied,
+  } = useGlobalStore(fpi.getters.CUSTOM_VALUE);
+  const { showSnackbar } = useSnackbar();
+
+  const [isCouponListModalOpen, setIsCouponListModalOpen] = useState(false);
+  const [isCouponSuccessModalOpen, setIsCouponSuccessModalOpen] =
+    useState(false);
+  const [error, setError] = useState(null);
+  const [searchParams] = useSearchParams();
+
+  const buyNow = JSON.parse(searchParams?.get("buy_now") || "false");
+  const { breakup_values: breakUpValues } = cartData;
+  const couponAttrs = useMemo(() => {
+    let attrs = {
+      title: t("resource.cart.coupons_title"),
+    };
+    if (breakUpValues?.coupon?.is_applied && breakUpValues?.coupon?.code) {
+      attrs = {
+        ...attrs,
+        couponCode: breakUpValues?.coupon?.code,
+        couponValue: breakUpValues?.coupon?.value || 0,
+        couponId: breakUpValues?.coupon?.uid,
+        hasCancel: true,
+      };
+    } else {
+      attrs = { ...attrs, subtitle: t("resource.cart.view_all_offers") };
+    }
+    return attrs;
+  }, [breakUpValues]);
+
+  const onCouponBoxClick = () => {
+    setIsCouponListModalOpen(true);
+  };
+
+  const onCouponListCloseModalClick = () => {
+    setIsCouponListModalOpen(false);
+  };
+
+  const onCouponSuccessCloseModalClick = () => {
+    setIsCouponSuccessModalOpen(false);
+  };
+
+  const onClearCouponError = () => {
+    setError(null);
+  };
+
+  const validateCoupon = async (payload) => {
+    let res = null;
+    if (creditNoteApplied && creditValidateCouponPayload) {
+      res = await fpi.executeGQL(VALIDATE_COUPON, creditValidateCouponPayload);
+    }
+    if (res?.data?.validateCoupon?.coupon_validity?.valid) {
+      res = await fpi.executeGQL(VALIDATE_COUPON, payload);
+    } else if (!creditNoteApplied) {
+      res = await fpi.executeGQL(VALIDATE_COUPON, payload);
+    }
+    fpi.custom.setValue(
+      "isCouponValid",
+      res?.data?.validateCoupon?.coupon_validity?.valid
+    );
+    fpi.custom.setValue("inValidCouponData", {
+      title: res?.data?.validateCoupon?.coupon_validity?.title,
+      message: res?.data?.validateCoupon?.coupon_validity?.display_message_en,
+    });
+  };
+
+  const couponPaymentOptions = (data) => {
+    const totalItem = data?.data?.cart?.breakup_values?.display?.find(
+      (item) => item.key === "total"
+    );
+    const finalAmount =
+      totalItem && typeof totalItem.value === "number"
+        ? Math.abs(totalItem.value)
+        : 0;
+    if (finalAmount === 0) {
+      setShowPayment(false);
+      setShowShipment(true);
+    }
+    setCheckoutAmount((prev) => {
+      if (prev === 0) {
+        showPaymentOptions(finalAmount);
+        return finalAmount;
+      } else {
+        setIsLoading(false);
+        return finalAmount;
+      }
+    });
+  };
+
+  const onApplyCouponClick = (couponCode, options = {}) => {
+    const payload = {
+      applyCouponRequestInput: { coupon_code: couponCode?.toString() },
+      applyCouponId: cartData?.id?.toString(),
+      buyNow,
+    };
+
+    const waitForModalClose = () =>
+      new Promise((resolve) => {
+        setTimeout(() => {
+          setIsCouponSuccessModalOpen(false);
+          resolve();
+        }, 2000);
+      });
+
+    fpi
+      .executeGQL(APPLY_COUPON, payload)
+      .then((response) => {
+        const applyCoupon = response?.data?.applyCoupon;
+        const coupon = applyCoupon?.coupon || {};
+        const couponBreakup = applyCoupon?.breakup_values?.coupon || {};
+        const isCouponFailed = !coupon?.is_valid || !coupon?.is_applied;
+        if (isCouponFailed) {
+          const cartTotal = applyCoupon?.breakup_values?.raw?.total;
+          const errorMsg =
+            coupon?.message ||
+            couponBreakup?.message ||
+            (typeof cartTotal === "number" && cartTotal <= 0
+              ? t(
+                  "resource.cart.coupon_code_not_applicable_items_are_already_at_the_best_price"
+                )
+              : t("resource.common.error_message"));
+          const couponError = new Error(errorMsg);
+          couponError.isUserFacing = true;
+          throw couponError;
+        }
+        if (validateCouponPayload) {
+          validateCoupon(validateCouponPayload);
+        }
+        fpi.custom.setValue("isCouponApplied", couponBreakup.is_applied);
+        setIsLoading(true);
+        setError(null);
+        setIsCouponListModalOpen(false);
+        setIsCouponSuccessModalOpen(true);
+
+        // Wait for modal timeout to finish before calling cart API
+        return waitForModalClose().then(() =>
+          fetchCartDetails(fpi, { buyNow })
+        );
+      })
+      .then((data) => {
+        if (currentStepIdx >= 1) {
+          couponPaymentOptions(data);
+        }
+        setIsLoading(false);
+      })
+      .catch((err) => {
+        console.error("Error applying coupon or fetching cart:", err);
+        const errorMessage = err?.isUserFacing
+          ? err.message
+          : t("resource.common.error_message");
+        if (options?.errorDisplay === "toast") {
+          setError(null);
+          showSnackbar(errorMessage, "error");
+        } else {
+          setError({ message: errorMessage });
+        }
+        setIsLoading(false);
+      });
+  };
+
+  const onRemoveCouponClick = (couponId) => {
+    const payload = {
+      removeCouponId: couponId?.toString(),
+      buyNow,
+    };
+    fpi
+      .executeGQL(REMOVE_COUPON, payload)
+      .then((res) => {
+        const isApplied = res?.data?.removeCoupon?.coupon?.is_applied;
+        if (currentStepIdx === 2) {
+          setIsLoading(true);
+          setShowPayment(true);
+          setShowShipment(false);
+        }
+        fpi.custom.setValue("isCouponApplied", isApplied);
+        return fetchCartDetails(fpi, { buyNow });
+      })
+      .then((data) => {
+        couponPaymentOptions(data);
+        showSnackbar(t("resource.cart.coupon_removed_successfully"), "success");
+      })
+      .catch((err) => {
+        setIsLoading(false);
+        console.error("Error removing coupon or fetching cart:", err);
+        setError({ message: t("resource.common.error_message") });
+      });
+  };
+  return {
+    ...couponAttrs,
+    isCouponListModalOpen,
+    isCouponSuccessModalOpen,
+    availableCouponList: coupons?.available_coupon_list,
+    error,
+    successCoupon: breakUpValues?.coupon,
+    couponSuccessGif,
+    onCouponBoxClick,
+    onCouponListCloseModalClick,
+    onCouponSuccessCloseModalClick,
+    onClearCouponError,
+    onApplyCouponClick,
+    onRemoveCouponClick,
+    isCouponValid,
+    inValidCouponData,
+  };
+};
+
+export default useCartCoupon;

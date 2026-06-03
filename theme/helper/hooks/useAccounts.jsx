@@ -1,0 +1,819 @@
+/* eslint-disable no-unused-vars */
+
+import { useState, useMemo } from "react";
+import { useLocation, useParams } from "react-router-dom";
+import {
+  LOGIN_WITH_OTP,
+  UPDATE_PROFILE,
+  REGISTER_WITH_FORM,
+  VERIFY_MOBILE_OTP,
+  SEND_OTP_ON_MOBILE,
+  VERIFY_EMAIL_OTP,
+  SEND_OTP_ON_EMAIL,
+  SEND_RESET_PASSWORD_EMAIL,
+  SENT_RESET_PASSWORD_MOBILE,
+  LOGIN_WITH_EMAIL_AND_PASSWORD,
+  LOGOUT,
+  FORGOT_PASSWORD,
+  MOBILE_RESET_PASSWORD,
+} from "../../queries/authQuery";
+import { USER_DATA_QUERY } from "../../queries/libQuery";
+import { useSnackbar } from "./hooks";
+import {
+  isRunningOnClient,
+  getLocalizedRedirectUrl,
+  removeCookie,
+} from "../utils";
+import {
+  useGlobalStore,
+  useNavigate,
+  useGlobalTranslation,
+} from "fdk-core/utils";
+// import { loginUserInFb } from '../../helper/facebook.utils';
+// import { renderButton } from '../../helper/google.utils';
+
+export const useAccounts = ({ fpi }) => {
+  const { locale } = useParams();
+  const { t } = useGlobalTranslation("translation");
+  const navigate = useNavigate();
+  const { showSnackbar } = useSnackbar();
+  const location = useLocation();
+
+  const [facebookUser, setFacebookUser] = useState(null);
+
+  const userData = useGlobalStore(fpi.getters.USER_DATA);
+  const platformData = useGlobalStore(fpi.getters.PLATFORM_DATA);
+  const isLoggedIn = useGlobalStore(fpi.getters.LOGGED_IN);
+  const [forgotPasswordData, setForgotPasswordData] = useState({});
+  const [isResetSuccess, setIsResetSuccess] = useState(false);
+
+  const openLogin = ({ redirect = true } = {}) => {
+    const queryParams = isRunningOnClient()
+      ? new URLSearchParams(location.search)
+      : null;
+    if (redirect) {
+      // Preserve existing redirectUrl if it exists, otherwise set it to current pathname
+      const existingRedirectUrl = queryParams?.get("redirectUrl");
+      if (!existingRedirectUrl) {
+        queryParams?.set(
+          "redirectUrl",
+          encodeURIComponent(location.pathname + location.search)
+        );
+      }
+    }
+    navigate?.(
+      "/auth/login" +
+        (queryParams?.toString() ? `?${queryParams.toString()}` : "")
+    );
+  };
+
+  const openRegister = ({ redirect = true } = {}) => {
+    const queryParams = isRunningOnClient()
+      ? new URLSearchParams(location.search)
+      : null;
+    if (redirect) {
+      // Preserve existing redirectUrl if it exists, otherwise set it to current pathname
+      const existingRedirectUrl = queryParams?.get("redirectUrl");
+      if (!existingRedirectUrl) {
+        queryParams?.set("redirectUrl", location.pathname);
+      }
+    }
+    navigate?.(
+      "/auth/register" +
+        (queryParams?.toString() ? `?${queryParams.toString()}` : "")
+    );
+  };
+
+  const openForgotPassword = () => {
+    // location.search already includes the '?' prefix, so use it directly
+    const queryString =
+      isRunningOnClient() && location.search ? location.search : "";
+    navigate?.("/auth/forgot-password" + queryString);
+  };
+
+  const openHomePage = () => {
+    const queryParams = isRunningOnClient()
+      ? new URLSearchParams(location.search)
+      : null;
+    const redirectUrl = queryParams?.get("redirectUrl") || "";
+    // URLSearchParams already decodes the value, but we try to decode again
+    // in case it was double-encoded. Use try-catch to handle edge cases.
+    let decodedUrl = redirectUrl;
+    try {
+      decodedUrl = decodeURIComponent(redirectUrl);
+    } catch (e) {
+      // If decoding fails, use the original value (already decoded by URLSearchParams)
+      decodedUrl = redirectUrl;
+    }
+    // Use redirectUrl if available, otherwise default to "/" (homepage)
+    const finalUrl = getLocalizedRedirectUrl(decodedUrl || "", locale);
+    window.location.href = window.location.origin + finalUrl;
+  };
+
+  const updateProfile = (data) => {
+    // this.$store.dispatch(UPDATE_PROFILE, data);
+    const id = window.APP_DATA.applicationID;
+    const {
+      registerToken,
+      firstName,
+      lastName,
+      gender,
+      dob,
+      email,
+      phone: { countryCode = "", mobile = "" } = {},
+    } = data;
+
+    const editProfileRequestSchemaInput = {
+      first_name: firstName,
+      last_name: lastName,
+      gender: gender === "other" || gender === "others" ? "unisex" : gender,
+    };
+
+    if (dob !== null && dob !== undefined && dob !== "") {
+      editProfileRequestSchemaInput.dob = dob;
+    }
+    if (countryCode) {
+      editProfileRequestSchemaInput.country_code = countryCode.toString();
+    }
+
+    if (registerToken) {
+      editProfileRequestSchemaInput.register_token = registerToken;
+    }
+
+    if (email) {
+      editProfileRequestSchemaInput.email = email;
+    }
+    if (countryCode && mobile) {
+      editProfileRequestSchemaInput.mobile = {
+        country_code: countryCode?.toString(),
+        phone: mobile,
+      };
+    }
+    const payload = {
+      platform: id,
+      editProfileRequestSchemaInput,
+    };
+
+    // Get auth state BEFORE the mutation to preserve it
+    const stateBeforeUpdate = fpi.store?.getState?.() || {};
+    const wasLoggedInBefore = stateBeforeUpdate?.auth?.logged_in === true;
+
+    return fpi.executeGQL(UPDATE_PROFILE, payload).then(async (res) => {
+      if (res?.errors) {
+        throw res?.errors?.[0];
+      }
+      const updateProfileData = res?.data?.updateProfile;
+
+      // Check auth state immediately after mutation
+      const stateAfterMutation = fpi.store?.getState?.() || {};
+      const loggedInAfterMutation =
+        stateAfterMutation?.auth?.logged_in === true;
+
+      // Update user data in store immediately if available
+      const currentUserData = fpi.getters?.USER_DATA?.(stateAfterMutation);
+      if (updateProfileData?.user && currentUserData) {
+        const updatedUserData = {
+          ...currentUserData,
+          user: updateProfileData.user,
+          first_name: updateProfileData.user.first_name,
+          last_name: updateProfileData.user.last_name,
+          gender: updateProfileData.user.gender,
+        };
+        fpi.custom.setValue("user_Data", updatedUserData);
+      }
+
+      // CRITICAL: If user was logged in before but state is now false/undefined,
+      // we MUST refresh USER_DATA_QUERY to restore the auth state
+      // This ensures the header and other components see the correct loggedIn value
+      if (wasLoggedInBefore && !loggedInAfterMutation) {
+        try {
+          // The mutation cleared the auth state - restore it by refreshing user data
+          const userDataResponse = await fpi.executeGQL(USER_DATA_QUERY);
+          const isLoggedInFromQuery =
+            !!userDataResponse?.data?.user?.logged_in_user;
+
+          if (!isLoggedInFromQuery && process.env.NODE_ENV === "development") {
+            // Only log in development to avoid console noise in production
+            // eslint-disable-next-line no-console
+            console.warn(
+              "Auth state issue: User was logged in before UPDATE_PROFILE, " +
+                "but USER_DATA_QUERY returns false after update."
+            );
+          }
+        } catch (error) {
+          // Silently handle error - user was logged in before, so session should still be valid
+          // The auth state will be restored on next navigation or page refresh
+          if (process.env.NODE_ENV === "development") {
+            // eslint-disable-next-line no-console
+            console.warn(
+              "Failed to restore auth state after profile update:",
+              error
+            );
+          }
+        }
+      } else if (wasLoggedInBefore && loggedInAfterMutation) {
+        // Auth state is still true - refresh user data in background to keep it synced
+        fpi.executeGQL(USER_DATA_QUERY).catch(() => {
+          // Silently fail - auth state is already correct
+        });
+      }
+
+      return updateProfileData;
+    });
+  };
+
+  const signOut = () => {
+    fpi
+      .executeGQL(LOGOUT)
+      .then((res) => {
+        if (res?.errors) {
+          throw res?.errors?.[0];
+        }
+        if (res?.data?.user?.logout?.logout) {
+          // Clear hyperlocal location on sign out so logged-out users start fresh.
+          // Safe for non-hyperlocal setups: no-op if keys/API unused; backward compatible.
+          try {
+            fpi.custom.setValue("selectedAddress", null);
+            if (typeof fpi.setLocationDetails === "function") {
+              fpi.setLocationDetails(null);
+            }
+          } catch (e) {
+            // Ignore store/SDK errors (e.g. SDK may not accept null)
+          }
+          if (isRunningOnClient()) {
+            try {
+              localStorage.removeItem("selectedAddress");
+              localStorage.removeItem("fynd_guest_pincode");
+              // Clear location cookie so FPI/bootstrap does not re-populate location after redirect
+              removeCookie("app_location_details");
+              // Prevent "Deliver to" modal from auto-opening until user navigates to home page
+              sessionStorage.setItem("fdk_post_logout", "1");
+            } catch (e) {
+              // Ignore storage errors
+            }
+          }
+
+          const queryParams = isRunningOnClient()
+            ? new URLSearchParams(location.search)
+            : null;
+          const redirectUrl = queryParams?.get("redirectUrl") || "";
+          // URLSearchParams already decodes the value, but we try to decode again
+          // in case it was double-encoded. Use try-catch to handle edge cases.
+          let decodedUrl = redirectUrl;
+          try {
+            decodedUrl = decodeURIComponent(redirectUrl);
+          } catch (e) {
+            // If decoding fails, use the original value (already decoded by URLSearchParams)
+            decodedUrl = redirectUrl;
+          }
+          const finalUrl = getLocalizedRedirectUrl(decodedUrl, locale);
+          window.location.href = window.location.origin + finalUrl;
+          return res?.data;
+        }
+        return Promise.reject();
+      })
+      .catch((error) => {
+        console.error("Error in signOut function:", error);
+      });
+  };
+
+  const signIn = (data) => {
+    // return this.$store.dispatch(SIGNIN_USER, data);
+    const { isRedirection, password, username } = data;
+    const payload = {
+      passwordLoginRequestSchemaInput: {
+        username,
+        password,
+      },
+    };
+    return fpi
+      .executeGQL(LOGIN_WITH_EMAIL_AND_PASSWORD, payload)
+      .then((res) => {
+        if (res?.errors) {
+          throw res?.errors?.[0];
+        }
+        if (isRedirection) {
+          const queryParams = isRunningOnClient()
+            ? new URLSearchParams(location.search)
+            : null;
+          const redirectUrl = queryParams?.get("redirectUrl") || "";
+          // URLSearchParams already decodes the value, but we try to decode again
+          // in case it was double-encoded. Use try-catch to handle edge cases.
+          let decodedUrl = redirectUrl;
+          try {
+            decodedUrl = decodeURIComponent(redirectUrl);
+          } catch (e) {
+            // If decoding fails, use the original value (already decoded by URLSearchParams)
+            decodedUrl = redirectUrl;
+          }
+          const finalUrl = getLocalizedRedirectUrl(decodedUrl, locale);
+          window.location.href = window.location.origin + finalUrl;
+        }
+        return res?.data?.loginWithEmailAndPassword;
+      });
+  };
+
+  const sendOtp = ({ mobile, countryCode }) => {
+    // return this.$store.dispatch(SEND_OTP, data);
+    const id = window.APP_DATA.applicationID;
+
+    const payload = {
+      platform: id,
+      sendOtpRequestSchemaInput: {
+        mobile,
+        country_code: countryCode,
+      },
+    };
+    return fpi.executeGQL(LOGIN_WITH_OTP, payload).then((res) => {
+      if (res?.errors) {
+        throw res?.errors?.[0];
+      }
+      return res?.data?.loginWithOTP;
+    });
+  };
+
+  const resendOtp = ({ mobile, countryCode, token, action }) => {
+    // return this.$store.dispatch(RESEND_OTP, data);
+    const id = window.APP_DATA.applicationID;
+
+    const payload = {
+      platform: id,
+      sendMobileOtpRequestSchemaInput: {
+        mobile,
+        country_code: countryCode,
+        token,
+        action,
+      },
+    };
+    return fpi.executeGQL(SEND_OTP_ON_MOBILE, payload).then((res) => {
+      if (res?.errors) {
+        throw res?.errors?.[0];
+      }
+      return res?.data?.sendOTPOnMobile;
+    });
+  };
+
+  const signInWithOtp = ({ otp, requestId, isRedirection = true }) => {
+    // return this.$store.dispatch(SIGNIN_USER_WITH_OTP, {
+    // 	is_redirection: true,
+    // 	...data,
+    // });
+
+    const id = window.APP_DATA.applicationID;
+
+    const payload = {
+      platform: id,
+      verifyOtpRequestSchemaInput: {
+        otp,
+        request_id: requestId,
+      },
+    };
+
+    return fpi.executeGQL(VERIFY_MOBILE_OTP, payload).then((res) => {
+      if (res.errors) {
+        throw res.errors?.[0];
+      }
+      const { user_exists: userExists } = res.data.verifyMobileOTP || {};
+      if (!userExists) {
+        if (isRedirection) {
+          // Preserve query params including redirectUrl when navigating to edit-profile
+          // location.search already includes the '?' prefix, so use it directly
+          const queryString =
+            isRunningOnClient() && location.search ? location.search : "";
+          navigate?.("/auth/edit-profile" + queryString);
+        }
+      } else {
+        const queryParams = isRunningOnClient()
+          ? new URLSearchParams(location.search)
+          : null;
+        const redirectUrl = queryParams?.get("redirectUrl") || "";
+        // URLSearchParams already decodes the value, but we try to decode again
+        // in case it was double-encoded. Use try-catch to handle edge cases.
+        let decodedUrl = redirectUrl;
+        try {
+          decodedUrl = decodeURIComponent(redirectUrl);
+        } catch (e) {
+          // If decoding fails, use the original value (already decoded by URLSearchParams)
+          decodedUrl = redirectUrl;
+        }
+        const finalUrl = getLocalizedRedirectUrl(decodedUrl, locale);
+        window.location.href = window.location.origin + finalUrl;
+      }
+      return res.data.verifyMobileOTP;
+    });
+  };
+
+  const signUp = (data) => {
+    // return this.$store.dispatch(SIGNUP_USER, data);
+    const id = window.APP_DATA.applicationID;
+    const {
+      registerToken,
+      firstName,
+      lastName,
+      gender,
+      email,
+      consent,
+      phone: { countryCode, mobile },
+      password,
+    } = data;
+    const formRegisterRequestSchemaInput = {
+      gender,
+      first_name: firstName,
+      last_name: lastName,
+      password,
+      consent,
+      register_token: registerToken,
+    };
+
+    if (email) {
+      formRegisterRequestSchemaInput.email = email;
+    }
+    if (countryCode && mobile) {
+      formRegisterRequestSchemaInput.phone = {
+        country_code: countryCode,
+        mobile,
+      };
+    }
+    const payload = {
+      platform: id,
+      formRegisterRequestSchemaInput,
+    };
+
+    return fpi.executeGQL(REGISTER_WITH_FORM, payload).then((res) => {
+      if (res.errors) {
+        throw res.errors?.[0];
+      }
+      return res?.data?.registerWithForm;
+    });
+  };
+
+  const setPassword = ({ password, code }) => {
+    // return this.$store.dispatch(SET_PASSWORD, data);
+    const payload = {
+      forgotPasswordRequestSchemaInput: {
+        code,
+        password,
+      },
+    };
+    return fpi.executeGQL(FORGOT_PASSWORD, payload).then((res) => {
+      if (res?.errors) {
+        throw res?.errors?.[0];
+      }
+      navigate?.("/");
+      return res?.data?.forgotPassword;
+    });
+  };
+
+  const sendOtpMobile = (data) => {
+    const id = window.APP_DATA.applicationID;
+    const { mobile, countryCode, action = "send" } = data;
+    const sendMobileOtpRequestSchemaInput = {
+      mobile,
+      country_code: countryCode,
+      action,
+    };
+
+    const payload = {
+      sendMobileOtpRequestSchemaInput,
+      platform: id,
+    };
+
+    return fpi.executeGQL(SEND_OTP_ON_MOBILE, payload).then((res) => {
+      if (res?.errors) {
+        throw res?.errors?.[0];
+      }
+      return res?.data?.sendOTPOnMobile;
+    });
+  };
+
+  const sendResetPasswordEmail = (data) => {
+    // return this.$store.dispatch(SEND_RESET_PASSWORD_EMAIL, data);
+    const id = window.APP_DATA.applicationID;
+    const { email } = data;
+
+    const payload = {
+      platform: id,
+      sendResetPasswordEmailRequestSchemaInput: {
+        email,
+      },
+    };
+    return fpi.executeGQL(SEND_RESET_PASSWORD_EMAIL, payload).then((res) => {
+      if (res?.errors) {
+        const errorMessage = res?.errors?.[0]?.message || t("resource.common.error_message");
+        showSnackbar(errorMessage, "error");
+        throw res?.errors?.[0];
+      }
+      if (res?.data?.sendResetPasswordEmail?.status === "success") {
+        showSnackbar(t("resource.common.reset_link_sent"), "success");
+      }
+      return res?.data?.sendResetPasswordEmail;
+    });
+  };
+
+  const sendResetPasswordMobile = (data) => {
+    const id = window.APP_DATA.applicationID;
+    const { mobile, country_code, action, token } = data;
+
+    const payload = {
+      platform: id,
+      sendMobileForgotOtpRequestSchemaInput: {
+        android_hash: Math.random().toString(36).substring(2, 15),
+        country_code: country_code,
+        mobile: mobile,
+        action: action,
+        token: token,
+      },
+    };
+    return fpi.executeGQL(SENT_RESET_PASSWORD_MOBILE, payload).then((res) => {
+      if (res?.errors) {
+        showSnackbar(res?.errors?.[0]?.message, "error");
+        throw res?.errors?.[0];
+      }
+      if (res?.data?.sendForgotOTPOnMobile?.success) {
+        showSnackbar(
+          t("resource.common.sent_otp_on_registered_mobile"),
+          "success"
+        );
+        fpi.custom.setValue(
+          "resend_otp_time",
+          res?.data?.sendForgotOTPOnMobile?.resend_timer
+        );
+        setForgotPasswordData(res?.data?.sendForgotOTPOnMobile);
+      }
+      return res?.data?.sendForgotOTPOnMobile;
+    });
+  };
+
+  const sendMobileResetPassword = (data) => {
+    const payload = {
+      forgotPasswordRequestSchemaInput: {
+        code: data?.code,
+        password: data?.password,
+      },
+    };
+    return fpi.executeGQL(MOBILE_RESET_PASSWORD, payload).then((res) => {
+      if (res?.errors?.lenght) {
+        showSnackbar(res?.errors?.[0]?.message, "error");
+        throw res?.errors?.[0];
+      }
+      if (res?.data?.resetForgotPassword?.success) {
+        setIsResetSuccess(true);
+        showSnackbar("Your password has been reset successfully", "success");
+      }
+      return res?.data?.sendResetPasswordMobile;
+    });
+  };
+
+  const resendVerifyMobileOtp = (data) => {
+    // return this.$store.dispatch(RESEND_VERIFY_OTP_MOBILE, data);
+    const { mobile, countryCode, token } = data;
+    const id = window.APP_DATA.applicationID;
+
+    const payload = {
+      platform: id,
+      sendMobileOtpRequestSchemaInput: {
+        mobile,
+        country_code: countryCode,
+        token,
+        action: "resend",
+      },
+    };
+    return fpi.executeGQL(SEND_OTP_ON_MOBILE, payload).then((res) => {
+      if (res?.errors) {
+        throw res?.errors?.[0];
+      }
+      return res?.data?.sendOTPOnMobile;
+    });
+  };
+
+  const resendVerifyEmailOtp = (data) => {
+    // return this.$store.dispatch(RESEND_VERIFY_OTP_EMAIL, data);
+    const { email, registerToken, token } = data;
+    const id = window.APP_DATA.applicationID;
+
+    const payload = {
+      platform: id,
+      sendEmailOtpRequestSchemaInput: {
+        email,
+        register_token: registerToken,
+        token,
+        action: "resend",
+      },
+    };
+    return fpi.executeGQL(SEND_OTP_ON_EMAIL, payload).then((res) => {
+      if (res?.errors) {
+        throw res?.errors?.[0];
+      }
+      return res?.data?.sendOTPOnEmail;
+    });
+  };
+
+  const verifyMobileOtp = (data) => {
+    // return this.$store.dispatch(VERIFY_MOBILE_OTP, data);
+    const {
+      requestId = "",
+      registerToken = "",
+      otp,
+      isEmailVerified,
+      isRedirection,
+    } = data;
+    const id = window.APP_DATA.applicationID;
+
+    const payload = {
+      platform: id,
+      verifyOtpRequestSchemaInput: {
+        otp,
+        register_token: registerToken,
+        request_id: requestId,
+      },
+    };
+    return fpi.executeGQL(VERIFY_MOBILE_OTP, payload).then((res) => {
+      if (res?.errors) {
+        throw res?.errors?.[0];
+      }
+      const {
+        user_exists: userExists,
+        email,
+        verify_email_link: verifyEmailLink,
+      } = res?.data?.verifyMobileOTP || {};
+      if (userExists) {
+        if (verifyEmailLink) {
+          if (isRedirection) {
+            const queryParams = isRunningOnClient()
+              ? new URLSearchParams(location.search)
+              : null;
+            queryParams?.set("email", email);
+            navigate?.(
+              "/auth/verify-email-link" +
+                (queryParams?.toString() ? `?${queryParams.toString()}` : "")
+            );
+          }
+        } else if (isRedirection) {
+          const queryParams = isRunningOnClient()
+            ? new URLSearchParams(location.search)
+            : null;
+          const redirectUrl = queryParams?.get("redirectUrl") || "";
+          // URLSearchParams already decodes the value, but we try to decode again
+          // in case it was double-encoded. Use try-catch to handle edge cases.
+          let decodedUrl = redirectUrl;
+          try {
+            decodedUrl = decodeURIComponent(redirectUrl);
+          } catch (e) {
+            // If decoding fails, use the original value (already decoded by URLSearchParams)
+            decodedUrl = redirectUrl;
+          }
+          const finalUrl = getLocalizedRedirectUrl(decodedUrl, locale);
+          window.location.href = window.location.origin + finalUrl;
+        }
+      }
+      return res?.data?.verifyMobileOTP;
+    });
+  };
+
+  const verifyEmailOtp = (data) => {
+    const {
+      otp,
+      email,
+      registerToken,
+      action,
+      isMobileVerified,
+      isRedirection,
+    } = data;
+    const id = window.APP_DATA.applicationID;
+
+    const payload = {
+      platform: id,
+      verifyEmailOtpRequestSchemaInput: {
+        register_token: registerToken,
+        otp,
+        email,
+        action,
+      },
+    };
+    return fpi.executeGQL(VERIFY_EMAIL_OTP, payload).then((res) => {
+      if (res?.errors) {
+        throw res?.errors?.[0];
+      }
+      const { user_exists: userExists } = res?.data?.verifyEmailOTP || {};
+      if (!userExists) {
+        if (isRedirection) {
+          navigate?.({
+            pathname: "/auth/edit-profile",
+            search: location.search,
+          });
+        }
+      } else if (isRedirection) {
+        const queryParams = isRunningOnClient()
+          ? new URLSearchParams(location.search)
+          : null;
+        const redirectUrl = queryParams?.get("redirectUrl") || "";
+        // URLSearchParams already decodes the value, but we try to decode again
+        // in case it was double-encoded. Use try-catch to handle edge cases.
+        let decodedUrl = redirectUrl;
+        try {
+          decodedUrl = decodeURIComponent(redirectUrl);
+        } catch (e) {
+          // If decoding fails, use the original value (already decoded by URLSearchParams)
+          decodedUrl = redirectUrl;
+        }
+        const finalUrl = getLocalizedRedirectUrl(decodedUrl, locale);
+        window.location.href = window.location.origin + finalUrl;
+      }
+      return res?.data?.verifyEmailOTP;
+    });
+  };
+
+  const sendVerificationLinkEmail = (data) => {
+    // return this.$store.dispatch(SEND_VERIFICATION_LINK_EMAIL, data);
+  };
+
+  const facebookText = useMemo(() => {
+    if (facebookUser?.is_signed_in) {
+      return `${t("resource.common.social_accounts.continue_as")} ${facebookUser.profile.full_name}`;
+    }
+    return t("resource.common.social_accounts.login_with_facebook");
+  }, [facebookUser]);
+
+  const facebookLogin = async () => {
+    // const appId = this.platformData.social_tokens.facebook.app_id;
+    // if (appId) {
+    // 	if (!this.facebookUser?.is_signed_in) {
+    // 		this.facebookUser = await loginUserInFb();
+    // 	}
+    // 	return this.$store.dispatch(FACEBOOK_LOGIN, {
+    // 		facebook_user: this.facebookUser,
+    // 	});
+    // } else {
+    // 	throw new Error('Facebook App ID not provided in platform');
+    // }
+  };
+
+  /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  const facebook = useMemo(() => ({
+    display_text: facebookText,
+    login: facebookLogin,
+  }));
+
+  const addEmail = (value) => {
+    // const appName = platformData.name;
+    // return this.$root.$apiSDK.user.addEmail({
+    // 	platform: appName,
+    // 	body: value,
+    // });
+  };
+
+  const deleteUser = (data) => {
+    // return this.$store.dispatch(DELETE_USER, data);
+  };
+
+  const sendForgotOtpMobile = (data) => {
+    // return this.$store.dispatch(SEND_FORGOT_OTP_MOBILE, data);
+  };
+
+  const sendForgotOtpEmail = (data) => {
+    // return this.$store.dispatch(SEND_FORGOT_OTP_EMAIL, data);
+  };
+
+  const verifyForgotMobileOtp = (data) => {
+    // return this.$store.dispatch(VERIFY_MOBILE_FORGOT_OTP, data);
+  };
+
+  const verifyForgotEmailOtp = (data) => {
+    // return this.$store.dispatch(VERIFY_EMAIL_FORGOT_OTP, data);
+  };
+
+  const resetForgotPassword = (data) => {
+    // return this.$store.dispatch(RESET_FORGOT_PASSWORD, data);
+  };
+
+  return {
+    userData,
+    platformData,
+    isLoggedIn,
+    openLogin,
+    openRegister,
+    openForgotPassword,
+    openHomePage,
+    updateProfile,
+    signOut,
+    signIn,
+    sendOtp,
+    resendOtp,
+    signInWithOtp,
+    signUp,
+    setPassword,
+    sendOtpMobile,
+    sendResetPasswordEmail,
+    sendResetPasswordMobile,
+    resendVerifyMobileOtp,
+    resendVerifyEmailOtp,
+    verifyMobileOtp,
+    verifyEmailOtp,
+    sendVerificationLinkEmail,
+    facebook,
+    addEmail,
+    sendMobileResetPassword,
+    forgotPasswordData,
+    isResetSuccess,
+  };
+};

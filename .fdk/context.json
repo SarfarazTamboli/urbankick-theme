@@ -1,0 +1,18 @@
+{
+  "theme": {
+    "active_context": "urbankick-theme",
+    "contexts": {
+      "urbankick-theme": {
+        "name": "urbankick-theme",
+        "application_id": "6a196d15efb00e46f69150ae",
+        "domain": "urbankick-store.fynd.io",
+        "company_id": 15306,
+        "theme_id": "6a19ba50a5347fd624b5032a",
+        "application_token": "xsntlUhHr",
+        "theme_type": "react",
+        "env": "api.fynd.com"
+      }
+    }
+  },
+  "partners": {}
+}
